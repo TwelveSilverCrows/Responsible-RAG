@@ -1,0 +1,57 @@
+# =============================================================================
+# docker-compose.yml
+# =============================================================================
+# Start:   docker compose up --build
+# Stop:    docker compose down
+# Logs:    docker compose logs -f rag-chatbot
+# =============================================================================
+
+services:
+
+  rag-chatbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: rag-chatbot:latest
+    container_name: rag-chatbot
+
+    ports:
+      - "8501:8501"
+
+    # Load all secrets and config from the .env file on the host
+    env_file:
+      - .env
+
+    volumes:
+      # Mount knowledge-base documents (read-only — never modified at runtime)
+      - ./resources:/app/resources:ro
+      # Persist the Chroma vector store across container restarts
+      - ./chroma_db:/app/chroma_db
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+# =============================================================================
+# Future API service (uncomment when src/api/ is implemented)
+# =============================================================================
+#  api:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile.api
+#    ports:
+#      - "8000:8000"
+#    env_file:
+#      - .env
+#    volumes:
+#      - ./resources:/app/resources:ro
+#      - ./chroma_db:/app/chroma_db
+#    depends_on:
+#      rag-chatbot:
+#        condition: service_healthy
+#    restart: unless-stopped

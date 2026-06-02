@@ -1,0 +1,50 @@
+# =============================================================================
+# .dockerignore — Keep the build context lean
+# =============================================================================
+
+# Version control
+.git
+.gitignore
+.github
+
+# Python artefacts
+__pycache__
+*.py[cod]
+*$py.class
+*.egg-info
+dist
+build
+.eggs
+
+# Virtual environments
+.venv
+venv
+env
+
+# uv artefacts
+.uv
+
+# Testing & tooling
+.pytest_cache
+.coverage
+htmlcov
+.tox
+.mypy_cache
+.ruff_cache
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+.DS_Store
+
+# Secrets — never bake into the image
+.env
+
+# Local data — mounted as volumes at runtime instead
+chroma_db
+resources
+
+# Docs
+*.md

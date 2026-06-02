@@ -1,0 +1,58 @@
+# =============================================================================
+# .gitignore
+# =============================================================================
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+.env
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+*.pyo
+*.pyd
+
+# ── Virtual environments (pip / uv) ───────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── uv ────────────────────────────────────────────────────────────────────────
+uv.lock         # Commit this if you want reproducible installs across machines;
+                # uncomment the line below to ignore it instead:
+# uv.lock
+
+# ── Testing & coverage ────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ── Type checkers / linters ───────────────────────────────────────────────────
+.mypy_cache/
+.ruff_cache/
+
+# ── IDEs ─────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# ── Project-specific data (user-provided, never in source control) ────────────
+# Place your knowledge-base documents in resources/ — they are NOT committed.
+resources/*
+!resources/.gitkeep
+
+# The vector store is rebuilt from resources/ at startup — no need to commit it.
+chroma_db/*
+!chroma_db/.gitkeep
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+docker-compose.override.yml
