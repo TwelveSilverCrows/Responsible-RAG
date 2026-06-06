@@ -3,33 +3,44 @@
 # =============================================================================
 # Start:   docker compose up --build
 # Stop:    docker compose down
-# Logs:    docker compose logs -f rag-chatbot
+# Logs:    docker compose logs -f <service>
 # =============================================================================
 
 services:
 
-  rag-chatbot:
+  # ---------------------------------------------------------------------------
+  # Frontend (Next.js)
+  # ---------------------------------------------------------------------------
+  frontend:
     build:
       context: .
-      dockerfile: Dockerfile
-    image: rag-chatbot:latest
-    container_name: rag-chatbot
+      dockerfile: frontend/Dockerfile
+    image: rag-frontend:latest
+    container_name: rag-frontend
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    # TODO: Connect to backend when API is implemented
+    # environment:
+    #   - NEXT_PUBLIC_API_URL=http://backend:8000
 
+  # ---------------------------------------------------------------------------
+  # Backend (Python/Streamlit)
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: rag-backend:latest
+    container_name: rag-backend
     ports:
       - "8501:8501"
-
-    # Load all secrets and config from the .env file on the host
     env_file:
-      - .env
-
+      - ../.env
     volumes:
-      # Mount knowledge-base documents (read-only — never modified at runtime)
-      - ./resources:/app/resources:ro
-      # Persist the Chroma vector store across container restarts
-      - ./chroma_db:/app/chroma_db
-
+      - ../resources:/app/resources:ro
+      - ../chroma_db:/app/chroma_db
     restart: unless-stopped
-
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]
       interval: 30s
@@ -38,20 +49,7 @@ services:
       start_period: 30s
 
 # =============================================================================
-# Future API service (uncomment when src/api/ is implemented)
+# Volumes
 # =============================================================================
-#  api:
-#    build:
-#      context: .
-#      dockerfile: Dockerfile.api
-#    ports:
-#      - "8000:8000"
-#    env_file:
-#      - .env
-#    volumes:
-#      - ./resources:/app/resources:ro
-#      - ./chroma_db:/app/chroma_db
-#    depends_on:
-#      rag-chatbot:
-#        condition: service_healthy
-#    restart: unless-stopped
+volumes:
+  chroma_db:

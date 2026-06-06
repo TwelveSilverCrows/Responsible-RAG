@@ -26,19 +26,20 @@ FROM base AS deps
 WORKDIR /app
 
 # Copy only the files uv needs to resolve & install dependencies
-COPY pyproject.toml .
-COPY requirements.txt .
+COPY ../pyproject.toml .
+COPY ../uv.lock .
 
 # Install dependencies into the system Python (no venv needed in Docker)
-RUN uv pip install --system --no-cache -r requirements.txt
+RUN uv pip install --system --no-cache -e .
 
 # ── Application layer ─────────────────────────────────────────────────────────
 FROM deps AS app
 
 WORKDIR /app
 
-# Copy source — .dockerignore controls what's excluded
-COPY . .
+# Copy backend source (app.py and src/)
+COPY app.py .
+COPY src/ ./src/
 
 # Create volume mount points
 RUN mkdir -p /app/resources /app/chroma_db

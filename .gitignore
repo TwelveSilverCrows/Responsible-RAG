@@ -45,6 +45,12 @@ htmlcov/
 *.swo
 .DS_Store
 
+# ── Frontend (Bun/Node) ──────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/.next/
+# Keep bun.lock committed if you want reproducible installs across machines:
+frontend/bun.lock
+
 # ── Project-specific data (user-provided, never in source control) ────────────
 # Place your knowledge-base documents in resources/ — they are NOT committed.
 resources/*
