@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   PanelLeftClose,
@@ -118,7 +118,7 @@ function WelcomeScreen({ onNewConversation }: { onNewConversation: () => void })
 
 // ── Main ChatContainer ──────────────────────────────────────
 export function ChatContainer() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const isMobile = useIsMobile();
 
   const {
@@ -175,17 +175,17 @@ export function ChatContainer() {
       messageCount: 0,
     });
     setActiveConversationId(id);
-    router.push(`/chat/${id}`);
+    navigate(`/chat/${id}`);
     if (isMobile) setMobileSidebarOpen(false);
-  }, [addConversation, setActiveConversationId, router, isMobile]);
+  }, [addConversation, setActiveConversationId, navigate, isMobile]);
 
   const handleSelectConversation = useCallback(
     (id: string) => {
       setActiveConversationId(id);
-      router.push(`/chat/${id}`);
+      navigate(`/chat/${id}`);
       if (isMobile) setMobileSidebarOpen(false);
     },
-    [setActiveConversationId, router, isMobile]
+    [setActiveConversationId, navigate, isMobile]
   );
 
   const handleSendMessage = useCallback(

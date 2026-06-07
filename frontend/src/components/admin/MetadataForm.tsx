@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import { X, Info, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -133,7 +133,7 @@ const LANGUAGES = [
 ];
 
 export function MetadataForm({ sourceType, initialData, onSubmit }: MetadataFormProps) {
-  const router = useRouter();
+  const navigate = useNavigate();
   const typeConfig = SOURCE_TYPE_CONFIG[sourceType];
 
   const [title, setTitle] = useState(initialData?.title ?? '');
@@ -187,7 +187,7 @@ export function MetadataForm({ sourceType, initialData, onSubmit }: MetadataForm
     return fieldErrors;
   }, [title, authors, publicationDate, publisher, url, doi, language, description, tags, contentSensitivity, internalNotes]);
 
-  const missingRequired = [];
+  const missingRequired: string[] = [];
   if (!title.trim()) missingRequired.push('Title');
   if (authors.length === 0) missingRequired.push('Authors');
   if (!contentSensitivity) missingRequired.push('Content Sensitivity');
@@ -215,7 +215,7 @@ export function MetadataForm({ sourceType, initialData, onSubmit }: MetadataForm
 
     onSubmit(result.data);
     toast.success('Source added successfully!');
-    router.push('/admin/sources/mock-id');
+    navigate('/admin/sources/mock-id');
   };
 
   return (

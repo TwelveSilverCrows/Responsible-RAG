@@ -1,6 +1,6 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { FileText, FileCode, Mic, Globe, Youtube } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -23,7 +23,7 @@ interface SourceCardProps {
 }
 
 export function SourceCard({ source }: SourceCardProps) {
-  const router = useRouter();
+  const navigate = useNavigate();
   const TypeIcon = typeIcons[source.type];
   const typeConfig = SOURCE_TYPE_CONFIG[source.type];
 
@@ -34,7 +34,7 @@ export function SourceCard({ source }: SourceCardProps) {
     >
       <Card
         className="cursor-pointer hover:border-primary/30 transition-colors"
-        onClick={() => router.push(`/admin/sources/${source.id}`)}
+        onClick={() => navigate(`/admin/sources/${source.id}`)}
       >
         <CardContent className="p-4 space-y-3">
           <div className="flex items-start gap-3">

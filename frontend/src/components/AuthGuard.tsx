@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/hooks/useAuth';
 import { Loader2 } from 'lucide-react';
 
@@ -10,16 +10,16 @@ import { Loader2 } from 'lucide-react';
  * Redirects authenticated but non-onboarded users to /onboarding/welcome
  */
 export function AuthGuard({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
+  const navigate = useNavigate();
   const { isAuthenticated, onboardingCompleted } = useAuthStore();
 
   useEffect(() => {
     if (!isAuthenticated) {
-      router.replace('/login');
+      navigate('/login', { replace: true });
     } else if (!onboardingCompleted) {
-      router.replace('/onboarding/welcome');
+      navigate('/onboarding/welcome', { replace: true });
     }
-  }, [isAuthenticated, onboardingCompleted, router]);
+  }, [isAuthenticated, onboardingCompleted, navigate]);
 
   if (!isAuthenticated) {
     return (
@@ -50,18 +50,18 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
  * Redirects non-admin users away from admin routes
  */
 export function AdminGuard({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
+  const navigate = useNavigate();
   const { isAuthenticated, onboardingCompleted, user } = useAuthStore();
 
   useEffect(() => {
     if (!isAuthenticated) {
-      router.replace('/login');
+      navigate('/login', { replace: true });
     } else if (!onboardingCompleted) {
-      router.replace('/onboarding/welcome');
+      navigate('/onboarding/welcome', { replace: true });
     } else if (user?.role !== 'admin') {
-      router.replace('/chat');
+      navigate('/chat', { replace: true });
     }
-  }, [isAuthenticated, onboardingCompleted, user, router]);
+  }, [isAuthenticated, onboardingCompleted, user, navigate]);
 
   if (!isAuthenticated || !onboardingCompleted) {
     return (
@@ -92,20 +92,20 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
  * Redirects authenticated users away from auth pages (login/register)
  */
 export function GuestGuard({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
+  const navigate = useNavigate();
   const { isAuthenticated, onboardingCompleted, user } = useAuthStore();
 
   useEffect(() => {
     if (isAuthenticated) {
       if (!onboardingCompleted) {
-        router.replace('/onboarding/welcome');
+        navigate('/onboarding/welcome', { replace: true });
       } else if (user?.role === 'admin') {
-        router.replace('/admin');
+        navigate('/admin', { replace: true });
       } else {
-        router.replace('/chat');
+        navigate('/chat', { replace: true });
       }
     }
-  }, [isAuthenticated, onboardingCompleted, user, router]);
+  }, [isAuthenticated, onboardingCompleted, user, navigate]);
 
   if (isAuthenticated) {
     return (

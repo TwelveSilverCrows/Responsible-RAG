@@ -1,7 +1,7 @@
 # =============================================================================
 # Dockerfile — Production image for the RAG Chatbot
 # =============================================================================
-# Build:  docker build -t rag-chatbot .
+# Build:  docker build -t rag-chatbot -f backend/Dockerfile .
 # Run:    docker run -p 8501:8501 --env-file .env rag-chatbot
 # =============================================================================
 
@@ -26,10 +26,13 @@ FROM base AS deps
 WORKDIR /app
 
 # Copy only the files uv needs to resolve & install dependencies
-COPY ../pyproject.toml .
-COPY ../uv.lock .
+COPY pyproject.toml uv.lock ./
 
-# Install dependencies into the system Python (no venv needed in Docker)
+# Create empty src/ so the hatchling editable install succeeds
+# (dependencies get cached; real source is added in the app stage)
+RUN mkdir -p src
+
+# Install project dependencies into the system Python
 RUN uv pip install --system --no-cache -e .
 
 # ── Application layer ─────────────────────────────────────────────────────────
@@ -38,8 +41,8 @@ FROM deps AS app
 WORKDIR /app
 
 # Copy backend source (app.py and src/)
-COPY app.py .
-COPY src/ ./src/
+COPY backend/app.py .
+COPY backend/src/ ./src/
 
 # Create volume mount points
 RUN mkdir -p /app/resources /app/chroma_db

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import {
   UserCheck,
   Lock,
@@ -49,7 +49,7 @@ import { formatProfileForDisplay } from '@/lib/utils/privacyHelpers';
 import { cn } from '@/lib/utils';
 
 export default function SettingsPage() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const consentStore = useConsentStore();
   const profileStore = useProfileStore();
   const chatStore = useChatStore();
@@ -73,7 +73,7 @@ export default function SettingsPage() {
       consentStore.setProfileMode('full');
       // Redirect to onboarding profile form
       setShowModeDialog(false);
-      router.push('/onboarding/profile');
+      navigate('/onboarding/profile');
       return;
     }
     setShowModeDialog(false);
@@ -309,7 +309,7 @@ export default function SettingsPage() {
           setShowModeDialog(true);
         }}
       >
-        <AlertDialogContent onPointerDownOutside={(e) => e.preventDefault()}>
+        <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{confirmation.title}</AlertDialogTitle>
             <AlertDialogDescription>
@@ -364,7 +364,7 @@ export default function SettingsPage() {
           setShowDeleteDialog(open);
         }}
       >
-        <AlertDialogContent onPointerDownOutside={(e) => e.preventDefault()}>
+        <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
               <AlertTriangle className="w-5 h-5 text-destructive" />

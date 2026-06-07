@@ -16,19 +16,19 @@ const typeIcons: Record<SourceType, React.ElementType> = {
 };
 
 const accentColors: Record<SourceType, string> = {
-  pdf: 'bg-red-50 border-red-200 hover:border-red-400 data-[selected=true]:border-red-500 data-[selected=true]:ring-red-500/20',
-  text: 'bg-blue-50 border-blue-200 hover:border-blue-400 data-[selected=true]:border-blue-500 data-[selected=true]:ring-blue-500/20',
-  audio: 'bg-purple-50 border-purple-200 hover:border-purple-400 data-[selected=true]:border-purple-500 data-[selected=true]:ring-purple-500/20',
-  webpage: 'bg-green-50 border-green-200 hover:border-green-400 data-[selected=true]:border-green-500 data-[selected=true]:ring-green-500/20',
-  youtube: 'bg-rose-50 border-rose-200 hover:border-rose-400 data-[selected=true]:border-rose-500 data-[selected=true]:ring-rose-500/20',
+  pdf: 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800 hover:border-red-400 dark:hover:border-red-500 data-[selected=true]:border-red-500 data-[selected=true]:ring-red-500/20',
+  text: 'bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800 hover:border-blue-400 dark:hover:border-blue-500 data-[selected=true]:border-blue-500 data-[selected=true]:ring-blue-500/20',
+  audio: 'bg-purple-50 dark:bg-purple-950/40 border-purple-200 dark:border-purple-800 hover:border-purple-400 dark:hover:border-purple-500 data-[selected=true]:border-purple-500 data-[selected=true]:ring-purple-500/20',
+  webpage: 'bg-green-50 dark:bg-green-950/40 border-green-200 dark:border-green-800 hover:border-green-400 dark:hover:border-green-500 data-[selected=true]:border-green-500 data-[selected=true]:ring-green-500/20',
+  youtube: 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 hover:border-rose-400 dark:hover:border-rose-500 data-[selected=true]:border-rose-500 data-[selected=true]:ring-rose-500/20',
 };
 
 const iconBgColors: Record<SourceType, string> = {
-  pdf: 'bg-red-100 text-red-600',
-  text: 'bg-blue-100 text-blue-600',
-  audio: 'bg-purple-100 text-purple-600',
-  webpage: 'bg-green-100 text-green-600',
-  youtube: 'bg-rose-100 text-rose-600',
+  pdf: 'bg-red-100 dark:bg-red-900/60 text-red-600 dark:text-red-300',
+  text: 'bg-blue-100 dark:bg-blue-900/60 text-blue-600 dark:text-blue-300',
+  audio: 'bg-purple-100 dark:bg-purple-900/60 text-purple-600 dark:text-purple-300',
+  webpage: 'bg-green-100 dark:bg-green-900/60 text-green-600 dark:text-green-300',
+  youtube: 'bg-rose-100 dark:bg-rose-900/60 text-rose-600 dark:text-rose-300',
 };
 
 interface SourceTypeSelectorProps {

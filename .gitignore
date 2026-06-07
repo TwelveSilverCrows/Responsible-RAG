@@ -45,9 +45,12 @@ htmlcov/
 *.swo
 .DS_Store
 
-# ── Frontend (Bun/Node) ──────────────────────────────────────────────────────
+# ── Frontend (Bun/Node / Vite) ───────────────────────────────────────────────
 frontend/node_modules/
 frontend/.next/
+frontend/dist/
+frontend/next-env.d.ts
+frontend/*.tsbuildinfo
 # Keep bun.lock committed if you want reproducible installs across machines:
 frontend/bun.lock
 

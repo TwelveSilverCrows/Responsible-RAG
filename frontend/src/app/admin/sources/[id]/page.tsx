@@ -1,8 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft,
   Pencil,
@@ -50,7 +49,7 @@ const typeIcons: Record<SourceType, React.ElementType> = {
 
 export default function SourceDetailPage() {
   const params = useParams();
-  const router = useRouter();
+  const navigate = useNavigate();
   const id = params.id as string;
   const source = getSourceById(id);
   const [editMode, setEditMode] = useState(false);
@@ -69,7 +68,7 @@ export default function SourceDetailPage() {
             The source you&apos;re looking for doesn&apos;t exist or has been removed.
           </p>
           <Button asChild variant="outline">
-            <Link href="/admin/sources">
+            <Link to="/admin/sources">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Back to Sources
             </Link>
@@ -126,7 +125,7 @@ export default function SourceDetailPage() {
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-start gap-3">
             <Button variant="ghost" size="icon" className="flex-shrink-0" asChild>
-              <Link href="/admin/sources" aria-label="Back to sources">
+              <Link to="/admin/sources" aria-label="Back to sources">
                 <ArrowLeft className="w-5 h-5" />
               </Link>
             </Button>
@@ -372,7 +371,7 @@ export default function SourceDetailPage() {
               <AlertDialogAction
                 onClick={() => {
                   setDeleteDialogOpen(false);
-                  router.push('/admin/sources');
+                  navigate('/admin/sources');
                 }}
                 className="bg-destructive text-white hover:bg-destructive/90"
               >

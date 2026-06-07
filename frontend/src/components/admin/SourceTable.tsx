@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useMemo, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   FileText,
   FileCode,
@@ -78,7 +77,7 @@ interface SourceTableProps {
 }
 
 export function SourceTable({ sources }: SourceTableProps) {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -275,7 +274,7 @@ export function SourceTable({ sources }: SourceTableProps) {
           </p>
           {!search && typeFilter === 'all' && statusFilter === 'all' && (
             <Button asChild>
-              <Link href="/admin/sources/new">
+              <Link to="/admin/sources/new">
                 <Plus className="w-4 h-4 mr-2" />
                 Add your first source
               </Link>
@@ -349,7 +348,7 @@ export function SourceTable({ sources }: SourceTableProps) {
                     <TableRow
                       key={source.id}
                       className="cursor-pointer"
-                      onClick={() => router.push(`/admin/sources/${source.id}`)}
+                      onClick={() => navigate(`/admin/sources/${source.id}`)}
                     >
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <Checkbox
@@ -406,12 +405,12 @@ export function SourceTable({ sources }: SourceTableProps) {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem
-                              onClick={() => router.push(`/admin/sources/${source.id}`)}
+                              onClick={() => navigate(`/admin/sources/${source.id}`)}
                             >
                               <Eye className="w-4 h-4 mr-2" /> View
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                              onClick={() => router.push(`/admin/sources/${source.id}`)}
+                              onClick={() => navigate(`/admin/sources/${source.id}`)}
                             >
                               <Pencil className="w-4 h-4 mr-2" /> Edit
                             </DropdownMenuItem>

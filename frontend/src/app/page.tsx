@@ -1,32 +1,32 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/hooks/useAuth';
 import { Loader2 } from 'lucide-react';
 
 export default function Home() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const { isAuthenticated, onboardingCompleted, user } = useAuthStore();
 
   useEffect(() => {
     if (!isAuthenticated) {
-      router.replace('/login');
+      navigate('/login', { replace: true });
       return;
     }
 
     if (!onboardingCompleted) {
-      router.replace('/onboarding/welcome');
+      navigate('/onboarding/welcome', { replace: true });
       return;
     }
 
     // Authenticated + onboarded → go to the right landing
     if (user?.role === 'admin') {
-      router.replace('/admin');
+      navigate('/admin', { replace: true });
     } else {
-      router.replace('/chat');
+      navigate('/chat', { replace: true });
     }
-  }, [isAuthenticated, onboardingCompleted, user, router]);
+  }, [isAuthenticated, onboardingCompleted, user, navigate]);
 
   return (
     <div className="flex items-center justify-center min-h-screen">

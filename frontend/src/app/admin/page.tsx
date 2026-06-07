@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import { Link } from 'react-router-dom';
 import {
   Database,
   Loader2,
@@ -75,7 +75,7 @@ export default function AdminDashboardPage() {
             </p>
           </div>
           <Button asChild>
-            <Link href="/admin/sources/new">
+            <Link to="/admin/sources/new">
               <Plus className="w-4 h-4 mr-2" />
               Add source
             </Link>
@@ -171,7 +171,7 @@ export default function AdminDashboardPage() {
                 return (
                   <Link
                     key={source.id}
-                    href={`/admin/sources/${source.id}`}
+                    to={`/admin/sources/${source.id}`}
                     className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors"
                   >
                     <TypeIcon className={`w-4 h-4 flex-shrink-0 ${typeConfig.color}`} />
@@ -191,7 +191,7 @@ export default function AdminDashboardPage() {
               })}
               <Separator />
               <Button variant="ghost" size="sm" className="w-full" asChild>
-                <Link href="/admin/sources" className="flex items-center justify-center gap-1">
+                <Link to="/admin/sources" className="flex items-center justify-center gap-1">
                   View all sources <ArrowRight className="w-3 h-3" />
                 </Link>
               </Button>
@@ -221,7 +221,7 @@ export default function AdminDashboardPage() {
                     return (
                       <Link
                         key={source.id}
-                        href={`/admin/sources/${source.id}`}
+                        to={`/admin/sources/${source.id}`}
                         className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors"
                       >
                         <TypeIcon className={`w-4 h-4 flex-shrink-0 ${typeConfig.color}`} />

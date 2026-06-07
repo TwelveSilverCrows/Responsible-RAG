@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { Link, useNavigate } from 'react-router-dom';
 import { Loader2, ArrowLeft, MailCheck, RefreshCw } from 'lucide-react';
 
 import { useAuthStore } from '@/hooks/useAuth';
@@ -12,7 +11,7 @@ import { AuthLayout } from '@/components/layout/AuthLayout';
 const COUNTDOWN_SECONDS = 60;
 
 export default function VerifyEmailPage() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const login = useAuthStore((s) => s.login);
   const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS);
   const [isResending, setIsResending] = useState(false);
@@ -61,7 +60,7 @@ export default function VerifyEmailPage() {
           <Button
             className="w-full"
             size="lg"
-            onClick={() => router.push('/chat')}
+            onClick={() => navigate('/chat')}
           >
             Continue to chat
           </Button>
@@ -128,7 +127,7 @@ export default function VerifyEmailPage() {
 
         <div className="text-center">
           <Link
-            href="/login"
+            to="/login"
             className="inline-flex items-center gap-1.5 text-sm text-primary font-medium hover:text-primary/80"
           >
             <ArrowLeft className="size-4" />

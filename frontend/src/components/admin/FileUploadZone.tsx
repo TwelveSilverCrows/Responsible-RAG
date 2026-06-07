@@ -67,7 +67,8 @@ export function FileUploadZone({ sourceType, onUploadComplete }: FileUploadZoneP
   );
 
   const onDrop = useCallback(
-    (acceptedFiles: File[], rejectedFiles: { file: File; errors: { message: string }[] }[]) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (acceptedFiles: File[], rejectedFiles: any[]) => {
       setError(null);
 
       if (rejectedFiles.length > 0) {

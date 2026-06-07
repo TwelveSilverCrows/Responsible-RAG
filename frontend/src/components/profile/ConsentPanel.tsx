@@ -131,7 +131,7 @@ export function ConsentPanel() {
           setShowModeDialog(true);
         }}
       >
-        <AlertDialogContent onPointerDownOutside={(e) => e.preventDefault()}>
+        <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{confirmation.title}</AlertDialogTitle>
             <AlertDialogDescription>

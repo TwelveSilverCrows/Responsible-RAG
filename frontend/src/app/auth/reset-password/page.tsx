@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
+import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2, ArrowLeft, Mail } from 'lucide-react';
@@ -66,7 +66,7 @@ export default function ResetPasswordPage() {
             </button>
           </p>
           <Link
-            href="/login"
+            to="/login"
             className="inline-flex items-center gap-1.5 text-sm text-primary font-medium hover:text-primary/80"
           >
             <ArrowLeft className="size-4" />
@@ -130,7 +130,7 @@ export default function ResetPasswordPage() {
 
         <div className="text-center">
           <Link
-            href="/login"
+            to="/login"
             className="inline-flex items-center gap-1.5 text-sm text-primary font-medium hover:text-primary/80"
           >
             <ArrowLeft className="size-4" />

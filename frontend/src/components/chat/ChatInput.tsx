@@ -7,7 +7,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils';
 import { useConsentStore } from '@/stores/consentStore';
 import { getChatPrivacyNotice } from '@/lib/utils/privacyHelpers';
-import Link from 'next/link';
+import { Link } from 'react-router-dom';
 
 interface ChatInputProps {
   onSend: (content: string) => void;
@@ -138,7 +138,7 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
               <span>
                 Responses are personalized to your profile.{' '}
                 <Link
-                  href="/profile"
+                  to="/profile"
                   className="text-primary hover:underline"
                 >
                   Edit profile

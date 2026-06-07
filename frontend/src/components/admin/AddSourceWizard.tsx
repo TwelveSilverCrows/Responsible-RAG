@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import { Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SourceTypeSelector } from '@/components/admin/SourceTypeSelector';
@@ -38,7 +38,7 @@ interface UploadedFileData {
 }
 
 export function AddSourceWizard() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState<WizardStep>('type');
   const [selectedType, setSelectedType] = useState<SourceType | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFileData[]>([]);
@@ -72,7 +72,7 @@ export function AddSourceWizard() {
   const handleMetadataSubmit = (data: SourceMetadataFormData) => {
     // In a real app, this would call an API to create the source
     void data;
-    router.push('/admin/sources');
+    navigate('/admin/sources');
   };
 
   const handleBack = () => {

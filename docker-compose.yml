@@ -9,12 +9,12 @@
 services:
 
   # ---------------------------------------------------------------------------
-  # Frontend (Next.js)
+  # Frontend (Vite + React)
   # ---------------------------------------------------------------------------
   frontend:
     build:
-      context: .
-      dockerfile: frontend/Dockerfile
+      context: ./frontend
+      dockerfile: Dockerfile
     image: rag-frontend:latest
     container_name: rag-frontend
     ports:
@@ -22,24 +22,24 @@ services:
     restart: unless-stopped
     # TODO: Connect to backend when API is implemented
     # environment:
-    #   - NEXT_PUBLIC_API_URL=http://backend:8000
+    #   - VITE_API_URL=http://backend:8000
 
   # ---------------------------------------------------------------------------
   # Backend (Python/Streamlit)
   # ---------------------------------------------------------------------------
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     image: rag-backend:latest
     container_name: rag-backend
     ports:
       - "8501:8501"
     env_file:
-      - ../.env
+      - .env
     volumes:
-      - ../resources:/app/resources:ro
-      - ../chroma_db:/app/chroma_db
+      - ./resources:/app/resources:ro
+      - ./chroma_db:/app/chroma_db
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]

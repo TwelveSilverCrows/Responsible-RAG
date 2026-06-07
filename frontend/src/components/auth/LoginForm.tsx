@@ -1,8 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import { useNavigate, Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2, Eye, EyeOff, Shield, UserPlus, Lock } from 'lucide-react';
@@ -26,7 +25,7 @@ import { Separator } from '@/components/ui/separator';
 import { GoogleOAuthButton } from '@/components/auth/GoogleOAuthButton';
 
 export function LoginForm() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const login = useAuthStore((s) => s.login);
   const loginAsNewUser = useAuthStore((s) => s.loginAsNewUser);
   const profileStore = useProfileStore();
@@ -58,7 +57,7 @@ export function LoginForm() {
     // Seed general mode for email logins
     seedGeneralDemo({ profileStore, consentStore });
 
-    router.push('/chat');
+    navigate('/chat');
   }
 
   function handleGoogleLogin() {
@@ -70,7 +69,7 @@ export function LoginForm() {
       emailVerified: true,
     });
     seedGeneralDemo({ profileStore, consentStore });
-    router.push('/chat');
+    navigate('/chat');
   }
 
   function handleDemoClientLogin() {
@@ -82,7 +81,7 @@ export function LoginForm() {
       emailVerified: true,
     });
     seedClientDemo({ profileStore, consentStore });
-    router.push('/chat');
+    navigate('/chat');
   }
 
   function handleDemoAdminLogin() {
@@ -94,7 +93,7 @@ export function LoginForm() {
       emailVerified: true,
     });
     seedAdminDemo({ profileStore, consentStore });
-    router.push('/admin');
+    navigate('/admin');
   }
 
   function handleDemoGeneralLogin() {
@@ -106,7 +105,7 @@ export function LoginForm() {
       emailVerified: true,
     });
     seedGeneralDemo({ profileStore, consentStore });
-    router.push('/chat');
+    navigate('/chat');
   }
 
   function handleNewUserDemo() {
@@ -118,7 +117,7 @@ export function LoginForm() {
       emailVerified: false,
     });
     clearDemoData({ profileStore, consentStore });
-    router.push('/onboarding/welcome');
+    navigate('/onboarding/welcome');
   }
 
   return (
@@ -217,7 +216,7 @@ export function LoginForm() {
                 <div className="flex items-center justify-between">
                   <FormLabel>Password</FormLabel>
                   <Link
-                    href="/auth/reset-password"
+                    to="/auth/reset-password"
                     className="text-xs text-primary hover:text-primary/80 underline-offset-2 hover:underline"
                   >
                     Forgot password?
@@ -272,7 +271,7 @@ export function LoginForm() {
       <p className="text-sm text-center text-muted-foreground">
         No account yet?{' '}
         <Link
-          href="/register"
+          to="/register"
           className="text-primary font-medium hover:text-primary/80 underline-offset-2 hover:underline"
         >
           Create one

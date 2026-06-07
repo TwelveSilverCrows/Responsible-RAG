@@ -1,8 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { Link, useLocation } from 'react-router-dom';
 import {
   MessageSquare,
   User,
@@ -28,6 +27,8 @@ import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { ProfileModeBadge } from '@/components/chat/ProfileModeBadge';
+import { useTheme } from '@/lib/themeProvider';
+import { Sun, Moon } from 'lucide-react';
 
 const clientNavItems = [
   { href: '/chat', label: 'Chat', icon: MessageSquare },
@@ -69,7 +70,7 @@ function SidebarContent({
           return (
             <Link
               key={item.href}
-              href={item.href}
+              to={item.href}
               onClick={onNavigate}
               className={cn(
                 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
@@ -93,8 +94,9 @@ function SidebarContent({
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
+  const { pathname } = useLocation();
   const { user, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -152,7 +154,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Menu className="w-5 h-5" />
             </Button>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleTheme}
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="flex items-center gap-2 px-2">
@@ -168,17 +179,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
                 <DropdownMenuItem asChild>
-                  <Link href="/profile" className="flex items-center gap-2">
+                  <Link to="/profile" className="flex items-center gap-2">
                     <User className="w-4 h-4" /> Profile
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link href="/settings" className="flex items-center gap-2">
+                  <Link to="/settings" className="flex items-center gap-2">
                     <Settings className="w-4 h-4" /> Settings
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link href="/feedback" className="flex items-center gap-2">
+                  <Link to="/feedback" className="flex items-center gap-2">
                     <MessageCircle className="w-4 h-4" /> Feedback
                   </Link>
                 </DropdownMenuItem>

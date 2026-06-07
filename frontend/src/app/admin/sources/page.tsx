@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import { Link } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AdminShell } from '@/components/layout/AdminShell';
@@ -22,7 +22,7 @@ export default function SourcesLibraryPage() {
             </p>
           </div>
           <Button asChild>
-            <Link href="/admin/sources/new">
+            <Link to="/admin/sources/new">
               <Plus className="w-4 h-4 mr-2" />
               Add Source
             </Link>

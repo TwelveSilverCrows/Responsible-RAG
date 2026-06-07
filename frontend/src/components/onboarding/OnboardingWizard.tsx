@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -53,7 +53,7 @@ function getInitialStep(): WizardStep {
 }
 
 export function OnboardingWizard() {
-  const router = useRouter();
+  const navigate = useNavigate();
 
   const [currentStep, setCurrentStep] = useState<WizardStep>(getInitialStep);
   const [direction, setDirection] = useState(1);
@@ -102,7 +102,7 @@ export function OnboardingWizard() {
     // Mark onboarding as completed so root redirect works properly
     useAuthStore.getState().completeOnboarding();
     useConsentStore.getState().setHasConsented(true);
-    router.push('/chat');
+    navigate('/chat');
   };
 
   const handleConsentComplete = useCallback((complete: boolean) => {

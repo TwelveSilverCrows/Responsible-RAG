@@ -13,7 +13,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { useConsentStore } from '@/stores/consentStore';
 import { getModeDescription } from '@/lib/utils/privacyHelpers';
-import Link from 'next/link';
+import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 
 interface ProfileModeBadgeProps {
@@ -115,7 +115,7 @@ function ModeInfoDialog({
         </div>
         <div className="flex justify-end">
           <Button variant="outline" asChild>
-            <Link href="/settings">Privacy Settings</Link>
+            <Link to="/settings">Privacy Settings</Link>
           </Button>
         </div>
       </DialogContent>

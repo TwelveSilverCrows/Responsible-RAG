@@ -1,7 +1,7 @@
 # =============================================================================
-# Dockerfile — Frontend (Next.js)
+# Dockerfile — Frontend (Vite + React)
 # =============================================================================
-# Build:  docker build -t rag-frontend ./frontend
+# Build:  docker build -t rag-frontend -f Dockerfile .
 # Run:    docker run -p 3000:3000 rag-frontend
 # =============================================================================
 
@@ -14,8 +14,8 @@ FROM base AS deps
 
 WORKDIR /app
 
-# Copy package files
-COPY frontend/package.json frontend/bun.lock ./
+# Copy package files (no lockfile — bun will generate one)
+COPY package.json ./
 
 # Install dependencies
 RUN bun install
@@ -28,32 +28,31 @@ FROM base AS builder
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY frontend/ .
+COPY . .
 
-# Build the Next.js application
+ARG NODE_OPTIONS="--max-old-space-size=512"
+ENV NODE_OPTIONS=$NODE_OPTIONS
+
+# Build the Vite application
 RUN bun run build
 
 # =============================================================================
 # Runner
 # =============================================================================
-FROM base AS runner
+FROM oven/bun:1-alpine AS runner
 
 WORKDIR /app
 
 ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+ENV PORT=3000
 
-RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 nextjs
+# Copy built assets
+COPY --from=builder /app/dist ./dist
 
-COPY --from=builder /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-
-USER nextjs
+# Install a minimal static file server
+RUN bun add serve
 
 EXPOSE 3000
 
-ENV PORT=3000
-ENV HOSTNAME="0.0.0.0"
-
-CMD ["node", "server.js"]
+CMD ["bun", "x", "serve", "dist", "-s", "-l", "3000"]

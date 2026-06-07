@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import { useNavigate, Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2, Eye, EyeOff } from 'lucide-react';
@@ -42,7 +41,7 @@ function getPasswordStrength(password: string): {
 }
 
 export function RegisterForm() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const loginAsNewUser = useAuthStore((s) => s.loginAsNewUser);
   const resetConsent = useConsentStore((s) => s.reset);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -77,7 +76,7 @@ export function RegisterForm() {
     });
     resetConsent(); // Fresh consent state for new user
 
-    router.push('/onboarding/welcome');
+    navigate('/onboarding/welcome');
   }
 
   function handleGoogleSignup() {
@@ -89,7 +88,7 @@ export function RegisterForm() {
       emailVerified: true,
     });
     resetConsent();
-    router.push('/onboarding/welcome');
+    navigate('/onboarding/welcome');
   }
 
   return (
@@ -265,7 +264,7 @@ export function RegisterForm() {
       <p className="text-sm text-center text-muted-foreground">
         Already have an account?{' '}
         <Link
-          href="/login"
+          to="/login"
           className="text-primary font-medium hover:text-primary/80 underline-offset-2 hover:underline"
         >
           Sign in

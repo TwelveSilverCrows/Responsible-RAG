@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams } from 'react-router-dom';
 import { AppShell } from '@/components/layout/AppShell';
 import { ChatContainer } from '@/components/chat/ChatContainer';
 import { useChatStore } from '@/stores/chatStore';
