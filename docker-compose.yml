@@ -24,24 +24,18 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-    depends_on:
-      - frontend
-      - backend
 
   # ---------------------------------------------------------------------------
   # Frontend (Vite + React)
   # ---------------------------------------------------------------------------
   frontend:
-    profiles:
-      - standalone       # expose port 80 only when run without Caddy
     build:
       context: ./frontend
       dockerfile: Dockerfile
     image: rag-frontend:latest
     container_name: rag-frontend
-    ports:
-      - "80:80"
     restart: unless-stopped
+    # Standalone: docker compose build frontend && docker run -p 80:80 rag-frontend
     # TODO: Connect to backend when API is implemented
     # environment:
     #   - VITE_API_URL=http://backend:8000
