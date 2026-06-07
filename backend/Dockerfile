@@ -58,7 +58,13 @@ RUN useradd --create-home --shell /bin/bash appuser \
 USER appuser
 
 # ── Entrypoint ────────────────────────────────────────────────────────────────
-ENTRYPOINT ["streamlit", "run", "app.py", \
-            "--server.port=8501", \
-            "--server.address=0.0.0.0", \
-            "--server.headless=true"]
+# STREAMLIT_ROOT_PATH allows serving behind a reverse proxy subpath
+# e.g. STREAMLIT_ROOT_PATH=/backend → accessible at /backend/
+ENTRYPOINT ["/bin/sh", "-c", " \
+  base=\"${STREAMLIT_ROOT_PATH:+--server.baseUrlPath=$STREAMLIT_ROOT_PATH}\"; \
+  exec streamlit run app.py \
+    --server.port=8501 \
+    --server.address=0.0.0.0 \
+    --server.headless=true \
+    $base \
+"]

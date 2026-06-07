@@ -9,6 +9,26 @@
 services:
 
   # ---------------------------------------------------------------------------
+  # Caddy — Reverse proxy with auto HTTPS (Let's Encrypt)
+  # ---------------------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    container_name: rag-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file:
+      - .env
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+      - backend
+
+  # ---------------------------------------------------------------------------
   # Frontend (Vite + React)
   # ---------------------------------------------------------------------------
   frontend:
@@ -17,8 +37,6 @@ services:
       dockerfile: Dockerfile
     image: rag-frontend:latest
     container_name: rag-frontend
-    ports:
-      - "3000:3000"
     restart: unless-stopped
     # TODO: Connect to backend when API is implemented
     # environment:
@@ -33,10 +51,10 @@ services:
       dockerfile: backend/Dockerfile
     image: rag-backend:latest
     container_name: rag-backend
-    ports:
-      - "8501:8501"
     env_file:
       - .env
+    environment:
+      - STREAMLIT_ROOT_PATH=/backend
     volumes:
       - ./resources:/app/resources:ro
       - ./chroma_db:/app/chroma_db
@@ -53,3 +71,5 @@ services:
 # =============================================================================
 volumes:
   chroma_db:
+  caddy_data:
+  caddy_config:

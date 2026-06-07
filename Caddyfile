@@ -1,0 +1,21 @@
+# =============================================================================
+# Caddyfile — Reverse proxy for RAG Chatbot
+# =============================================================================
+# The DOMAIN variable is read from .env (set DOMAIN=yourdomain.com).
+# Caddy automatically provisions and renews SSL via Let's Encrypt.
+# =============================================================================
+
+{$DOMAIN:localhost} {
+    # ── Frontend (Vite + React SPA) ──────────────────────────────────────────
+    reverse_proxy frontend:3000
+
+    # ── Backend (Streamlit) under /backend/ ──────────────────────────────────
+    handle_path /backend/* {
+        reverse_proxy backend:8501
+    }
+
+    # ── Logs ─────────────────────────────────────────────────────────────────
+    log {
+        output file /data/access.log
+    }
+}
