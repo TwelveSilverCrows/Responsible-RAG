@@ -5,7 +5,7 @@
 # Run:    docker run -p 3000:3000 rag-frontend
 # =============================================================================
 
-FROM oven/bun:1-alpine AS base
+FROM node:22-alpine AS base
 
 # =============================================================================
 # Dependencies
@@ -14,11 +14,11 @@ FROM base AS deps
 
 WORKDIR /app
 
-# Copy package files (no lockfile — bun will generate one)
+# Copy package files (no lockfile — npm will generate one)
 COPY package.json ./
 
-# Install dependencies
-RUN bun install
+# Install dependencies (--no-fund --no-audit to reduce memory & network overhead)
+RUN npm install --no-fund --no-audit
 
 # =============================================================================
 # Builder
@@ -34,12 +34,12 @@ ARG NODE_OPTIONS="--max-old-space-size=512"
 ENV NODE_OPTIONS=$NODE_OPTIONS
 
 # Build the Vite application
-RUN bun run build
+RUN npm run build
 
 # =============================================================================
 # Runner
 # =============================================================================
-FROM oven/bun:1-alpine AS runner
+FROM node:22-alpine AS runner
 
 WORKDIR /app
 
@@ -50,9 +50,7 @@ ENV PORT=3000
 # Copy built assets
 COPY --from=builder /app/dist ./dist
 
-# Install a minimal static file server
-RUN bun add serve
-
 EXPOSE 3000
 
-CMD ["bun", "x", "serve", "dist", "-s", "-l", "3000"]
+# Use npx to run serve without permanently installing it
+CMD ["npx", "--yes", "serve", "dist", "-s", "-l", "3000"]

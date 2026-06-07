@@ -11,7 +11,7 @@ A **Retrieval-Augmented Generation (RAG)** chatbot tailored for Canadian academi
 - **Population profiles** — four research-cited system-prompt personas (`RAGPopulation`)
 - **Swappable embeddings** — OpenVINO (Intel CPU/NPU) or Nomic Embed via a single env flag
 - **Clean architecture** — UI, core logic, profiles, and config are fully decoupled
-- **Docker-ready** — single `docker compose up` for local or production deployment
+- **Docker-ready** — full `docker compose` setup for the entire stack
 - **API-expansion-ready** — `src/core` is framework-agnostic; add FastAPI without touching business logic
 
 ---
@@ -31,22 +31,62 @@ cp .env.example .env
 
 Drop `.txt` or `.pdf` files into `resources/` (sub-directories are scanned recursively).  The index is built automatically on first launch.
 
-### 3a. Run locally
+### 3a. Run locally (backend only)
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-streamlit run app.py
+streamlit run backend/app.py
 ```
 
 Open [http://localhost:8501](http://localhost:8501).
 
+For the frontend, see `frontend/package.json` scripts (requires Bun or Node):
+
+```bash
+cd frontend
+bun install    # or npm install
+bun run dev    # or npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
 ### 3b. Run via Docker
+
+Build and start all services:
 
 ```bash
 docker compose up --build
 ```
+
+Open the frontend at [http://localhost:3000](http://localhost:3000) and the backend at [http://localhost:8501](http://localhost:8501).
+
+---
+
+## Docker Compose Reference
+
+The stack consists of two services:
+
+| Service   | Container         | Port  | Tech                |
+|-----------|-------------------|-------|----------------------|
+| Frontend  | `rag-frontend`    | 3000  | Vite + React (Bun)  |
+| Backend   | `rag-backend`     | 8501  | Streamlit (Python)  |
+
+### Common commands
+
+| Action | Command |
+|---|---|
+| **Build & start** | `docker compose up --build` |
+| **Start in background** | `docker compose up --build -d` |
+| **Stop** | `docker compose down` |
+| **Stop & delete volumes** | `docker compose down -v` |
+| **Rebuild a single service** | `docker compose build frontend` or `docker compose build backend` |
+| **Restart a service** | `docker compose restart frontend` |
+| **View logs (all)** | `docker compose logs -f` |
+| **View logs (one service)** | `docker compose logs -f backend` |
+| **View running containers** | `docker compose ps` |
+| **Shell into a container** | `docker compose exec frontend sh` or `docker compose exec backend bash` |
 
 ---
 
@@ -54,33 +94,36 @@ docker compose up --build
 
 ```
 rag-chatbot/
-├── app.py                         # Streamlit entry point (wiring only)
-├── requirements.txt
-├── Dockerfile
-├── docker-compose.yml
-├── .env.example
+├── docker-compose.yml             # Orchestrates frontend + backend
+├── .env.example                   # Copy to .env and configure
+│
+├── backend/
+│   ├── Dockerfile                 # Multi-stage build (uv + hatchling)
+│   ├── app.py                     # Streamlit entry point (wiring only)
+│   └── src/
+│       ├── config/
+│       │   └── settings.py        # Pydantic-settings; all env vars in one place
+│       │
+│       ├── core/                  # ⚡ Framework-agnostic business logic
+│       │   ├── chunker.py         # SmartChunker (semantic → recursive fallback)
+│       │   ├── embeddings.py      # EmbeddingFactory (OpenVINO | Nomic)
+│       │   ├── profiles.py        # Audience-specific prompts
+│       │   ├── rag_chain.py       # RAGChain (full pipeline, invocable)
+│       │   ├── retrievers.py      # RetrieverFactory (ensemble BM25 + vector)
+│       │   └── vector_store.py    # Chroma lifecycle
+│       └── ui/
+│           ├── app.py             # ChatView — Streamlit page controller
+│           ├── components.py      # Stateless HTML rendering helpers
+│           └── styles.py          # APP_STYLES CSS constant
+│
+├── frontend/
+│   ├── Dockerfile                 # Multi-stage Vite build (Bun)
+│   ├── package.json
+│   ├── vite.config.ts
+│   └── src/                       # React app (see frontend/src/)
 │
 ├── resources/                     # ← drop knowledge-base documents here
-├── chroma_db/                     # ← auto-generated vector store (gitignored)
-│
-└── src/
-    ├── config/
-    │   └── settings.py            # Pydantic-settings; all env vars in one place
-    │
-    ├── core/                      # ⚡ Framework-agnostic business logic
-    │   ├── embeddings.py          # EmbeddingFactory (OpenVINO | Nomic)
-    │   ├── chunker.py             # SmartChunker (semantic → recursive fallback)
-    │   ├── knowledge_base.py      # KnowledgeBase (Chroma lifecycle)
-    │   ├── retriever.py           # RetrieverFactory (ensemble BM25 + vector)
-    │   └── rag_chain.py           # RAGChain (full pipeline, invocable)
-    │
-    ├── profiles/
-    │   └── population_profiles.py # RAGPopulation StrEnum — audience prompts
-    │
-    └── ui/
-        ├── styles.py              # APP_STYLES CSS constant
-        ├── components.py          # Stateless HTML rendering helpers
-        └── chat_view.py           # ChatView — Streamlit page controller
+└── chroma_db/                     # ← auto-generated vector store (gitignored)
 ```
 
 ---
@@ -115,10 +158,10 @@ To add a profile: add a new `StrEnum` member in `src/profiles/population_profile
 
 ## Expanding to an API
 
-`src/core` contains zero UI or framework dependencies.  To expose the same pipeline via a REST API:
+`backend/src/core` contains zero UI or framework dependencies.  To expose the same pipeline via a REST API:
 
 ```
-src/
+backend/src/
 └── api/                           # New package — add when ready
     ├── __init__.py
     ├── main.py                    # FastAPI app
@@ -127,7 +170,7 @@ src/
     └── schemas.py                 # Pydantic request / response models
 ```
 
-Then add a second service in `docker-compose.yml` (a commented scaffold is already included).
+Then add a third service in `docker-compose.yml`.
 
 ---
 
