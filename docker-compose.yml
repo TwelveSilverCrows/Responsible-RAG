@@ -32,11 +32,15 @@ services:
   # Frontend (Vite + React)
   # ---------------------------------------------------------------------------
   frontend:
+    profiles:
+      - standalone       # expose port 80 only when run without Caddy
     build:
       context: ./frontend
       dockerfile: Dockerfile
     image: rag-frontend:latest
     container_name: rag-frontend
+    ports:
+      - "80:80"
     restart: unless-stopped
     # TODO: Connect to backend when API is implemented
     # environment:

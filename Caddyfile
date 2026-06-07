@@ -7,7 +7,7 @@
 
 {$DOMAIN:localhost} {
     # ── Frontend (Vite + React SPA) ──────────────────────────────────────────
-    reverse_proxy frontend:3000
+    reverse_proxy frontend:80
 
     # ── Backend (Streamlit) under /backend/ ──────────────────────────────────
     handle_path /backend/* {
