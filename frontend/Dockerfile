@@ -5,52 +5,61 @@
 # Run:    docker run -p 3000:3000 rag-frontend
 # =============================================================================
 
-FROM node:22-alpine AS base
-
-# =============================================================================
-# Dependencies
-# =============================================================================
-FROM base AS deps
+# ── Builder ───────────────────────────────────────────────────────────────────
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-# Copy package files (no lockfile — npm will generate one)
+# Copy package manifest (lockfile generated automatically inside container)
 COPY package.json ./
 
-# Install dependencies (--no-fund --no-audit to reduce memory & network overhead)
-RUN npm install --no-fund --no-audit
+# Install all deps (including dev) for the build
+RUN npm install --no-fund --no-audit --progress=false
 
-# =============================================================================
-# Builder
-# =============================================================================
-FROM base AS builder
-
-WORKDIR /app
-
-COPY --from=deps /app/node_modules ./node_modules
+# Copy source
 COPY . .
 
-ARG NODE_OPTIONS="--max-old-space-size=512"
-ENV NODE_OPTIONS=$NODE_OPTIONS
+# Limit Node heap to prevent OOM on low-memory hosts
+ENV NODE_OPTIONS="--max-old-space-size=512"
+# CI=true disables spinner/color overhead during build
+ENV CI=true
 
 # Build the Vite application
 RUN npm run build
 
-# =============================================================================
-# Runner
-# =============================================================================
-FROM node:22-alpine AS runner
+# ── Runner ────────────────────────────────────────────────────────────────────
+FROM nginx:alpine AS runner
 
-WORKDIR /app
+# Copy built static assets
+COPY --from=builder /app/dist /usr/share/nginx/html
 
-ENV NODE_ENV=production
-ENV HOST=0.0.0.0
-ENV PORT=3000
+# Remove default nginx config and add a minimal one for SPA routing
+RUN rm -rf /etc/nginx/conf.d/default.conf
+COPY <<'EOF' /etc/nginx/conf.d/default.conf
+server {
+    listen       3000;
+    server_name  localhost;
 
-# Copy built assets
-COPY --from=builder /app/dist ./dist
+    root   /usr/share/nginx/html;
+    index  index.html;
+
+    # SPA fallback — serve index.html for all non-file routes
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Cache static assets aggressively
+    location ~* \.(?:ico|css|js|svg|woff2?)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+}
+EOF
 
 EXPOSE 3000
 
-# Use npx to run serve without permanently installing it
-CMD ["npx", "--yes", "serve", "dist", "-s", "-l", "3000"]
+CMD ["nginx", "-g", "daemon off;"]

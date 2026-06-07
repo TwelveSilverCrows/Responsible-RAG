@@ -12,6 +12,9 @@ export default defineConfig({
     },
   },
   build: {
+    minify: 'esbuild',              // lighter than terser
+    sourcemap: false,               // saves memory + build time
+    chunkSizeWarningLimit: 1000,    // suppress noise on low-RAM builds
     rollupOptions: {
       output: {
         manualChunks: {
