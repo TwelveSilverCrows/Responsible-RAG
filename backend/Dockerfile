@@ -1,15 +1,15 @@
 # =============================================================================
-# Dockerfile — Production image for the RAG Chatbot
+# Dockerfile — Production image for the RAG Chatbot API
 # =============================================================================
 # Build:  docker build -t rag-chatbot -f backend/Dockerfile .
-# Run:    docker run -p 8501:8501 --env-file .env rag-chatbot
+# Run:    docker run -p 8000:8000 --env-file .env rag-chatbot
 # =============================================================================
 
 # ── Base image ────────────────────────────────────────────────────────────────
 FROM python:3.12-slim AS base
 
 LABEL maintainer="your-team@example.com"
-LABEL description="Canadian Academic RAG Chatbot — Streamlit UI"
+LABEL description="Canadian Academic RAG Chatbot — FastAPI"
 
 # System dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -47,10 +47,10 @@ COPY backend/src/ ./src/
 # Create volume mount points
 RUN mkdir -p /app/resources /app/chroma_db
 
-EXPOSE 8501
+EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl --fail http://localhost:8501/_stcore/health || exit 1
+    CMD curl --fail http://localhost:8000/api/v1/health || exit 1
 
 # Run as non-root for security
 RUN useradd --create-home --shell /bin/bash appuser \
@@ -58,13 +58,12 @@ RUN useradd --create-home --shell /bin/bash appuser \
 USER appuser
 
 # ── Entrypoint ────────────────────────────────────────────────────────────────
-# STREAMLIT_ROOT_PATH allows serving behind a reverse proxy subpath
-# e.g. STREAMLIT_ROOT_PATH=/backend → accessible at /backend/
-ENTRYPOINT ["/bin/sh", "-c", " \
-  base=\"${STREAMLIT_ROOT_PATH:+--server.baseUrlPath=$STREAMLIT_ROOT_PATH}\"; \
-  exec streamlit run app.py \
-    --server.port=8501 \
-    --server.address=0.0.0.0 \
-    --server.headless=true \
-    $base \
-"]
+# Single worker — async handles many concurrent requests without extra processes.
+# Workers=1 keeps memory usage minimal.
+# --no-server-header saves a few bytes per response (minor but free).
+CMD ["uvicorn", "app:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--workers", "1", \
+     "--no-server-header", \
+     "--loop", "uvloop"]

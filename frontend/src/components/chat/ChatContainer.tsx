@@ -13,9 +13,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { useChatStore } from '@/stores/chatStore';
 import { useConsentStore } from '@/stores/consentStore';
 import { useProfileStore } from '@/stores/profileStore';
 import { ProfileModeBadge } from '@/components/chat/ProfileModeBadge';
@@ -24,13 +22,8 @@ import { ChatInput } from '@/components/chat/ChatInput';
 import { StreamingIndicator } from '@/components/chat/StreamingIndicator';
 import { ConversationSidebar } from '@/components/chat/ConversationSidebar';
 import { useIsMobile } from '@/hooks/use-mobile';
-import {
-  mockConversations,
-  mockMessages,
-  streamingResponses,
-  mockCitations,
-} from '@/lib/chatMockData';
-import { cn } from '@/lib/utils';
+import { useChat } from '@/hooks/useChat';
+import { useChatStore } from '@/stores/chatStore';
 
 // ── Context Panel ───────────────────────────────────────────
 function ContextPanel() {
@@ -132,26 +125,25 @@ export function ChatContainer() {
     setMessages,
     setActiveConversationId,
     addMessage,
-    updateMessage,
     addConversation,
     setStreaming,
     toggleSidebar,
     toggleContextPanel,
-  } = useChatStore();
+    sendMessage,
+    loadConversations,
+  } = useChat();
 
   const initializedRef = useRef(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const streamCountRef = useRef(0);
 
-  // Initialize mock data on first mount
+  // Load conversations from the API on first mount
   useEffect(() => {
-    if (!initializedRef.current && conversations.length === 0) {
+    if (!initializedRef.current) {
       initializedRef.current = true;
-      setConversations(mockConversations);
-      setMessages(mockMessages);
+      loadConversations();
     }
-  }, [conversations.length, setConversations, setMessages]);
+  }, [loadConversations]);
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -162,6 +154,10 @@ export function ChatContainer() {
   const activeMessages = activeConversationId
     ? messages.filter((m) => m.conversationId === activeConversationId)
     : [];
+
+  const activeConversation = activeConversationId
+    ? conversations.find((c) => c.id === activeConversationId)
+    : null;
 
   // ── Handlers ────────────────────────────────────────────
   const handleNewConversation = useCallback(() => {
@@ -189,62 +185,16 @@ export function ChatContainer() {
   );
 
   const handleSendMessage = useCallback(
-    (content: string) => {
-      if (!activeConversationId) return;
-
-      // Add user message
-      const userMsgId = `msg-${Date.now()}`;
-      addMessage({
-        id: userMsgId,
-        conversationId: activeConversationId,
-        role: 'user',
-        content,
-        citations: [],
-        createdAt: new Date().toISOString(),
-      });
-
-      // Update conversation last message
-      const conv = conversations.find((c) => c.id === activeConversationId);
-      if (conv) {
-        useChatStore.getState().renameConversation(
-          activeConversationId,
-          conv.title === 'New conversation'
-            ? content.slice(0, 50) + (content.length > 50 ? '…' : '')
-            : conv.title
-        );
+    async (content: string) => {
+      // sendMessage from useChat auto-creates a conversation if none is active
+      await sendMessage(content);
+      // If a new conversation was created, navigate to it
+      const store = useChatStore.getState();
+      if (store.activeConversationId && store.activeConversationId !== activeConversationId) {
+        navigate(`/chat/${store.activeConversationId}`);
       }
-
-      // Start streaming simulation
-      const assistantMsgId = `msg-${Date.now() + 1}`;
-      setStreaming(true);
-
-      // Add streaming assistant message after a short delay
-      setTimeout(() => {
-        const responseIndex = streamCountRef.current % streamingResponses.length;
-        streamCountRef.current += 1;
-        const responseText = streamingResponses[responseIndex];
-
-        addMessage({
-          id: assistantMsgId,
-          conversationId: activeConversationId,
-          role: 'assistant',
-          content: responseText,
-          citations: [],
-          createdAt: new Date().toISOString(),
-          isStreaming: true,
-        });
-
-        // Complete streaming after another delay
-        setTimeout(() => {
-          updateMessage(assistantMsgId, {
-            isStreaming: false,
-            citations: [mockCitations[responseIndex % mockCitations.length]],
-          });
-          setStreaming(false);
-        }, 1500);
-      }, 800);
     },
-    [activeConversationId, addMessage, setStreaming, updateMessage, conversations]
+    [sendMessage, activeConversationId, navigate]
   );
 
   // ── Sidebar content (shared between desktop & mobile) ──
@@ -257,15 +207,15 @@ export function ChatContainer() {
   );
 
   return (
-    <div className="flex h-full relative">
-      {/* Desktop sidebar */}
+    <div className="flex-1 min-h-0 flex overflow-hidden">
+      {/* Desktop conversation sidebar */}
       {!isMobile && sidebarOpen && (
         <motion.aside
           initial={{ width: 0, opacity: 0 }}
           animate={{ width: 280, opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
           transition={{ duration: 0.2 }}
-          className="w-[280px] flex-shrink-0 border-r border-border overflow-hidden"
+          className="w-[280px] flex-shrink-0 border-r border-border bg-card flex flex-col overflow-hidden"
         >
           {sidebarContent}
         </motion.aside>
@@ -281,14 +231,14 @@ export function ChatContainer() {
       )}
 
       {/* Main chat area */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Top bar */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* ── Top bar — always locked ── */}
         <div className="flex items-center justify-between px-3 h-12 border-b bg-card flex-shrink-0">
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 min-w-0">
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8"
+              className="h-8 w-8 flex-shrink-0"
               onClick={() => {
                 if (isMobile) setMobileSidebarOpen(true);
                 else toggleSidebar();
@@ -301,12 +251,17 @@ export function ChatContainer() {
                 <PanelLeftOpen className="w-4 h-4" />
               )}
             </Button>
+            {activeConversation && (
+              <span className="text-sm font-medium truncate ml-1">
+                {activeConversation.title}
+              </span>
+            )}
             <ProfileModeBadge variant="chat" />
           </div>
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8"
+            className="h-8 w-8 flex-shrink-0"
             onClick={toggleContextPanel}
             aria-label={contextPanelOpen ? 'Close context panel' : 'Open context panel'}
           >
@@ -318,36 +273,37 @@ export function ChatContainer() {
           </Button>
         </div>
 
-        {/* Message thread or welcome */}
-        {!activeConversationId ? (
-          <WelcomeScreen onNewConversation={handleNewConversation} />
-        ) : (
-          <>
-            <ScrollArea className="flex-1">
-              <div className="max-w-3xl mx-auto px-4 py-4 space-y-4">
-                <AnimatePresence initial={false}>
-                  {activeMessages.map((msg) => (
-                    <motion.div
-                      key={msg.id}
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.2 }}
-                    >
-                      <MessageBubble message={msg} />
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
+        {/* ── Scrollable content (welcome or messages) ── */}
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden chat-messages-scrollbar">
+          {!activeConversationId ? (
+            <div className="flex items-center justify-center min-h-full">
+              <WelcomeScreen onNewConversation={handleNewConversation} />
+            </div>
+          ) : (
+            <div className="max-w-3xl mx-auto px-4 py-4 space-y-4">
+              <AnimatePresence initial={false}>
+                {activeMessages.map((msg) => (
+                  <motion.div
+                    key={msg.id}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <MessageBubble message={msg} />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
 
-                {isStreaming && !activeMessages.some((m) => m.isStreaming) && (
-                  <StreamingIndicator text="Thinking…" />
-                )}
-                <div ref={messagesEndRef} />
-              </div>
-            </ScrollArea>
+              {isStreaming && !activeMessages.some((m) => m.isStreaming) && (
+                <StreamingIndicator text="Thinking…" />
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </div>
 
-            <ChatInput onSend={handleSendMessage} disabled={isStreaming} />
-          </>
-        )}
+        {/* ── Chat input — always at the bottom ── */}
+        <ChatInput onSend={handleSendMessage} disabled={isStreaming} />
       </div>
 
       {/* Context panel */}
@@ -358,9 +314,11 @@ export function ChatContainer() {
             animate={{ width: 280, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="w-[280px] flex-shrink-0 border-l border-border overflow-hidden bg-card"
+            className="w-[280px] flex-shrink-0 border-l border-border bg-card flex flex-col overflow-hidden"
           >
-            <ContextPanel />
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              <ContextPanel />
+            </div>
           </motion.aside>
         )}
       </AnimatePresence>

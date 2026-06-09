@@ -170,3 +170,32 @@
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background-color: var(--foreground);
 }
+
+/* Thin custom scrollbars for chat areas */
+.chat-messages-scrollbar,
+.chat-sidebar-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.chat-messages-scrollbar::-webkit-scrollbar,
+.chat-sidebar-scrollbar::-webkit-scrollbar {
+  width: 5px;
+}
+.chat-messages-scrollbar::-webkit-scrollbar-track,
+.chat-sidebar-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chat-messages-scrollbar::-webkit-scrollbar-thumb,
+.chat-sidebar-scrollbar::-webkit-scrollbar-thumb {
+  background-color: var(--border);
+  border-radius: 3px;
+}
+.chat-messages-scrollbar::-webkit-scrollbar-thumb:hover,
+.chat-sidebar-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: var(--muted-foreground);
+}
+
+/* Prevent body scroll — AppShell handles viewport constraint */
+html, body, #root {
+  height: 100%;
+}

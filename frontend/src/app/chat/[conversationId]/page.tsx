@@ -23,9 +23,7 @@ export default function ConversationPage() {
   return (
     <AuthGuard>
       <AppShell>
-        <div className="h-[calc(100vh-3.5rem)]">
-          <ChatContainer />
-        </div>
+        <ChatContainer />
       </AppShell>
     </AuthGuard>
   );

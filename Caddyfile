@@ -9,9 +9,9 @@
     # ── Frontend (Vite + React SPA) ──────────────────────────────────────────
     reverse_proxy frontend:80
 
-    # ── Backend (Streamlit) under /backend/ ──────────────────────────────────
-    handle_path /backend/* {
-        reverse_proxy backend:8501
+    # ── Backend (FastAPI) under /api/v1/ ──────────────────────────────────────
+    handle_path /api/v1/* {
+        reverse_proxy backend:8000
     }
 
     # ── Logs ─────────────────────────────────────────────────────────────────

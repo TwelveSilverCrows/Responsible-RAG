@@ -1,7 +1,8 @@
 # =============================================================================
 # docker-compose.yml
 # =============================================================================
-# Start:   docker compose up --build
+# Dev:     docker compose up --build -d
+# Prod:    docker compose --profile prod up --build -d
 # Stop:    docker compose down
 # Logs:    docker compose logs -f <service>
 # =============================================================================
@@ -9,9 +10,47 @@
 services:
 
   # ---------------------------------------------------------------------------
-  # Caddy — Reverse proxy with auto HTTPS (Let's Encrypt)
+  # Frontend (Vite + React via nginx)
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: rag-frontend:latest
+    container_name: rag-frontend
+    ports:
+      - "3000:80"
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Backend (FastAPI)
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: rag-backend:latest
+    container_name: rag-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./resources:/app/resources:ro
+      - ./chroma_db:/app/chroma_db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # Caddy — Reverse proxy with auto HTTPS (prod only)
   # ---------------------------------------------------------------------------
   caddy:
+    profiles: ["prod"]
     image: caddy:2-alpine
     container_name: rag-caddy
     restart: unless-stopped
@@ -24,45 +63,6 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-
-  # ---------------------------------------------------------------------------
-  # Frontend (Vite + React)
-  # ---------------------------------------------------------------------------
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    image: rag-frontend:latest
-    container_name: rag-frontend
-    restart: unless-stopped
-    # Standalone: docker compose build frontend && docker run -p 80:80 rag-frontend
-    # TODO: Connect to backend when API is implemented
-    # environment:
-    #   - VITE_API_URL=http://backend:8000
-
-  # ---------------------------------------------------------------------------
-  # Backend (Python/Streamlit)
-  # ---------------------------------------------------------------------------
-  backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    image: rag-backend:latest
-    container_name: rag-backend
-    env_file:
-      - .env
-    environment:
-      - STREAMLIT_ROOT_PATH=/backend
-    volumes:
-      - ./resources:/app/resources:ro
-      - ./chroma_db:/app/chroma_db
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
 
 # =============================================================================
 # Volumes

@@ -21,7 +21,7 @@ Supported document formats
 Usage
 -----
     kb = KnowledgeBase(settings, embedding_fn)
-    retriever = kb.as_retriever(k=3)
+    retriever = kb.as_retriever(k=5)
     all_docs  = kb.get_all_documents()
 """
 
@@ -66,7 +66,7 @@ class KnowledgeBase:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def as_retriever(self, k: int = 3) -> VectorStoreRetriever:
+    def as_retriever(self, k: int = 5) -> VectorStoreRetriever:
         """
         Return a similarity-search retriever over the vector store.
 

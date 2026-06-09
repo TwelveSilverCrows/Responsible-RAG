@@ -110,7 +110,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     : 'U';
 
   return (
-    <div className="min-h-screen flex">
+    <div className="h-screen flex overflow-hidden">
       {/* Desktop sidebar */}
       <aside
         className={cn(
@@ -140,9 +140,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </Sheet>
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Topbar */}
-        <header className="h-14 border-b bg-card flex items-center justify-between px-4">
+        <header className="h-14 border-b bg-card flex items-center justify-between px-4 flex-shrink-0">
           <div className="flex items-center gap-2">
             <Button
               variant="ghost"
