@@ -38,21 +38,62 @@ class RAGResult:
     """Return type for RAG chain invocation."""
 
     answer: str
-    sources: list[str]
+    sources: list[dict]
+
+
+def _get_source_label(doc) -> str:
+    """Extract a human-readable source label from a document's metadata.
+
+    Tries ``source_title`` first (set during ingestion from the MongoDB
+    Source record), then falls back to ``title``, then ``source`` (file
+    path), and finally ``"Unknown source"``.
+    """
+    for key in ("source_title", "title", "source"):
+        value = doc.metadata.get(key)
+        if value:
+            return str(value)
+    return "Unknown source"
 
 
 def _format_docs(docs) -> str:
     """Format docs with source references for the LLM context."""
     return "\n\n".join(
-        f"[{i + 1}]: {doc.metadata.get('title', 'unknown')}\n{doc.page_content}"
+        f"[{i + 1}]: {_get_source_label(doc)}\n{doc.page_content}"
         for i, doc in enumerate(docs)
     )
 
 
-def _extract_sources(docs) -> list[str]:
-    """Extract unique source file paths from retrieved documents."""
+def _extract_source_metadata(docs) -> list[dict]:
+    """Extract unique source metadata from retrieved documents.
+
+    Returns one entry per unique source (deduplicated by ``source_id``).
+    All metadata fields were stored during ingestion from the MongoDB
+    Source record, so no additional database lookup is needed.
+    """
     seen = set()
-    return [s for doc in docs if (s := doc.metadata.get("title", "unknown")) not in seen and not seen.add(s)]
+    sources: list[dict] = []
+    for doc in docs:
+        meta = doc.metadata
+        sid = meta.get("source_id") or _get_source_label(doc)
+        if sid in seen:
+            continue
+        seen.add(sid)
+        sources.append({
+            "source_id": sid,
+            "source_title": meta.get("source_title", _get_source_label(doc)),
+            "source_type": meta.get("source_type", "pdf"),
+            "authors": meta.get("authors", []),
+            "publication_date": meta.get("publication_date") or None,
+            "publisher": meta.get("publisher") or None,
+            "url": meta.get("url", ""),
+            "doi": meta.get("doi", ""),
+            "language": meta.get("language") or None,
+            "description": meta.get("description") or None,
+            "tags": meta.get("tags", []),
+            "content_sensitivity": meta.get("content_sensitivity", "low"),
+            "excerpt": doc.page_content[:300],
+        })
+    return sources
 
 
 # ── Prompt template ────────────────────────────────────────────────────────────
@@ -103,7 +144,7 @@ class RAGChain:
         answer = self._chain.invoke(
             {"question": question, "group_of_people": group_prompt}
         )
-        # Extract sources from retrieval (re-run is minimal overhead)
-        sources = _extract_sources(self._ensemble.invoke(question))
+        # Extract rich source metadata from retrieved docs
+        sources = _extract_source_metadata(self._ensemble.invoke(question))
         return RAGResult(answer=answer, sources=sources)
 

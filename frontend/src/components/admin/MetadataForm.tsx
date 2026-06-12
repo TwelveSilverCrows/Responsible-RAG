@@ -32,6 +32,7 @@ interface MetadataFormProps {
   sourceType: SourceType;
   initialData?: Partial<SourceMetadataFormData>;
   onSubmit: (data: SourceMetadataFormData) => void;
+  disabled?: boolean;
 }
 
 // Tag/chip input component
@@ -132,7 +133,7 @@ const LANGUAGES = [
   { value: 'hi', label: 'Hindi' },
 ];
 
-export function MetadataForm({ sourceType, initialData, onSubmit }: MetadataFormProps) {
+export function MetadataForm({ sourceType, initialData, onSubmit, disabled }: MetadataFormProps) {
   const navigate = useNavigate();
   const typeConfig = SOURCE_TYPE_CONFIG[sourceType];
 
@@ -167,7 +168,7 @@ export function MetadataForm({ sourceType, initialData, onSubmit }: MetadataForm
       authors,
       publicationDate: publicationDate || null,
       publisher: publisher || null,
-      url: url || null,
+      url: url,
       doi: doi || null,
       language: language || null,
       description: description || null,
@@ -190,6 +191,7 @@ export function MetadataForm({ sourceType, initialData, onSubmit }: MetadataForm
   const missingRequired: string[] = [];
   if (!title.trim()) missingRequired.push('Title');
   if (authors.length === 0) missingRequired.push('Authors');
+  if (!url.trim()) missingRequired.push('URL');
   if (!contentSensitivity) missingRequired.push('Content Sensitivity');
 
   const handleSubmit = () => {
@@ -198,7 +200,7 @@ export function MetadataForm({ sourceType, initialData, onSubmit }: MetadataForm
       authors,
       publicationDate: publicationDate || null,
       publisher: publisher || null,
-      url: url || null,
+      url: url,
       doi: doi || null,
       language: language || null,
       description: description || null,
@@ -214,8 +216,6 @@ export function MetadataForm({ sourceType, initialData, onSubmit }: MetadataForm
     }
 
     onSubmit(result.data);
-    toast.success('Source added successfully!');
-    navigate('/admin/sources/mock-id');
   };
 
   return (
@@ -451,8 +451,8 @@ export function MetadataForm({ sourceType, initialData, onSubmit }: MetadataForm
             <p className="text-sm text-destructive">
               Missing required: {missingRequired.join(', ')}
             </p>
-            <Button disabled>
-              Save source
+            <Button disabled={disabled}>
+              {disabled ? 'Saving…' : 'Save source'}
             </Button>
           </div>
         </div>
@@ -460,8 +460,8 @@ export function MetadataForm({ sourceType, initialData, onSubmit }: MetadataForm
 
       {missingRequired.length === 0 && (
         <div className="flex justify-end max-w-2xl">
-          <Button onClick={handleSubmit}>
-            Save source
+          <Button onClick={handleSubmit} disabled={disabled}>
+            {disabled ? 'Saving…' : 'Save source'}
           </Button>
         </div>
       )}

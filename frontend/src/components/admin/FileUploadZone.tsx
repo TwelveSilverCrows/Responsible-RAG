@@ -4,8 +4,10 @@ import { useState, useCallback } from 'react';
 import { Upload, X, FileText, FileCode, Mic, AlertCircle } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { api } from '@/lib/api';
 import type { SourceType } from '@/types/source';
 import { SOURCE_TYPE_CONFIG } from '@/types/source';
 
@@ -15,8 +17,9 @@ const typeIcons: Record<string, React.ElementType> = {
   audio: Mic,
 };
 
-interface UploadedFile {
+export interface UploadedFile {
   id: string;
+  sourceId?: string;      // Backend source ID (set after upload completes)
   file: File;
   progress: number;
   status: 'uploading' | 'complete' | 'error';
@@ -41,30 +44,26 @@ export function FileUploadZone({ sourceType, onUploadComplete }: FileUploadZoneP
       )
     : {};
 
-  const simulateUpload = useCallback(
-    (fileId: string) => {
-      let progress = 0;
-      const interval = setInterval(() => {
-        progress += Math.random() * 20 + 5;
-        if (progress >= 100) {
-          progress = 100;
-          clearInterval(interval);
-          setFiles((prev) =>
-            prev.map((f) =>
-              f.id === fileId ? { ...f, progress: 100, status: 'complete' } : f
-            )
-          );
-        } else {
-          setFiles((prev) =>
-            prev.map((f) =>
-              f.id === fileId ? { ...f, progress: Math.min(progress, 99) } : f
-            )
-          );
-        }
-      }, 400);
-    },
-    []
-  );
+  const uploadFile = useCallback(async (uploadedFile: UploadedFile) => {
+    try {
+      const res = await api.sources.upload(uploadedFile.file);
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.id === uploadedFile.id
+            ? { ...f, progress: 100, status: 'complete' as const, sourceId: res.id }
+            : f
+        )
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Upload failed';
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.id === uploadedFile.id ? { ...f, status: 'error', error: msg } : f
+        )
+      );
+      toast.error(msg);
+    }
+  }, []);
 
   const onDrop = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -85,9 +84,9 @@ export function FileUploadZone({ sourceType, onUploadComplete }: FileUploadZoneP
       }));
 
       setFiles((prev) => [...prev, ...newFiles]);
-      newFiles.forEach((f) => simulateUpload(f.id));
+      newFiles.forEach((f) => uploadFile(f));
     },
-    [simulateUpload]
+    [uploadFile]
   );
 
   const { getRootProps, getInputProps, isDragActive, open } = useDropzone({

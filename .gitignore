@@ -60,8 +60,8 @@ resources/*
 !resources/.gitkeep
 
 # The vector store is rebuilt from resources/ at startup — no need to commit it.
-chroma_db/*
-!chroma_db/.gitkeep
+vectordb/*
+!vectordb/.gitkeep
 
 # ── Docker ────────────────────────────────────────────────────────────────────
 docker-compose.override.yml

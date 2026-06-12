@@ -12,7 +12,7 @@ Endpoints:
     GET    /api/v1/auth/me                — Get current user info
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from src.api.schemas.auth import (
     RegisterRequest,
     LoginRequest,
@@ -26,38 +26,30 @@ from src.api.schemas.auth import (
 from src.api.schemas.common import ErrorResponse
 from src.api.middleware import get_current_user, require_current_user
 from src.api.db.models import User
-from src.api.services.auth_service import AuthService
+from src.api.services.auth_service import AuthService, decode_token, create_access_token, create_refresh_token
 
 router = APIRouter()
 
 
+def _user_to_response(user: User) -> UserResponse:
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        display_name=user.display_name,
+        role=user.role,
+        email_verified=user.email_verified,
+        onboarding_completed=True,
+        created_at="",
+    )
+
+
 @router.post(
     "/register",
-    response_model=LoginResponse,
-    status_code=201,
-    responses={409: {"model": ErrorResponse}},
+    status_code=501,
 )
 async def register(body: RegisterRequest):
-    """
-    Register a new user account.
-
-    Creates the user, generates a verification token, and returns
-    JWT tokens.  The client should redirect to email verification
-    if ``user.email_verified`` is false.
-    """
-    # TODO: Implement
-    # result = await AuthService.register(
-    #     email=body.email,
-    #     password=body.password,
-    #     display_name=body.display_name,
-    # )
-    # return LoginResponse(
-    #     access_token=result.access_token,
-    #     refresh_token=result.refresh_token,
-    #     user=UserResponse.model_validate(result.user),
-    #     is_new_user=result.is_new_user,
-    # )
-    raise NotImplementedError("TODO: implement register")
+    """Registration is not available in dev mode."""
+    raise HTTPException(status_code=501, detail="Registration is not available in dev mode")
 
 
 @router.post(
@@ -67,12 +59,25 @@ async def register(body: RegisterRequest):
 )
 async def login(body: LoginRequest):
     """
-    Authenticate with email and password.
+    Authenticate with email and password against the dummy admin user.
 
     Returns JWT access + refresh tokens.
     """
-    # TODO: Implement
-    raise NotImplementedError("TODO: implement login")
+    try:
+        result = await AuthService.login(email=body.email, password=body.password)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+        )
+
+    return LoginResponse(
+        access_token=result.access_token,
+        refresh_token=result.refresh_token,
+        token_type="bearer",
+        user=_user_to_response(result.user),
+        is_new_user=result.is_new_user,
+    )
 
 
 @router.post(
@@ -82,59 +87,70 @@ async def login(body: LoginRequest):
 )
 async def google_auth(body: GoogleAuthRequest):
     """
-    Authenticate or register via Google OAuth.
+    Authenticate with a Google ID token (client-side OAuth flow).
 
-    Send the Google ID token obtained from the frontend's OAuth flow.
+    Verifies the token with Google, creates/returns a user, and issues
+    JWT access + refresh tokens.
     """
-    # TODO: Implement
-    raise NotImplementedError("TODO: implement google_auth")
+    try:
+        result = await AuthService.google_auth(id_token=body.id_token)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+        )
+
+    return LoginResponse(
+        access_token=result.access_token,
+        refresh_token=result.refresh_token,
+        token_type="bearer",
+        user=_user_to_response(result.user),
+        is_new_user=result.is_new_user,
+    )
 
 
-@router.post(
-    "/verify-email",
-    response_model=dict,
-)
+@router.post("/verify-email", status_code=501)
 async def verify_email(body: VerifyEmailRequest):
-    """
-    Verify email address using the token from the verification link.
-    """
-    # TODO: Implement
-    raise NotImplementedError("TODO: implement verify_email")
+    raise HTTPException(status_code=501, detail="Not available in dev mode")
 
 
-@router.post(
-    "/reset-password",
-    response_model=dict,
-)
+@router.post("/reset-password", status_code=501)
 async def reset_password(body: ResetPasswordRequest):
-    """
-    Request a password reset email.
-
-    Always returns 200 to prevent email enumeration.
-    """
-    # TODO: Implement
-    raise NotImplementedError("TODO: implement reset_password")
+    raise HTTPException(status_code=501, detail="Not available in dev mode")
 
 
-@router.post(
-    "/reset-password/confirm",
-    response_model=dict,
-)
+@router.post("/reset-password/confirm", status_code=501)
 async def confirm_reset_password(body: SetNewPasswordRequest):
-    """
-    Set a new password using the token from the reset email.
-    """
-    # TODO: Implement
-    raise NotImplementedError("TODO: implement confirm_reset_password")
+    raise HTTPException(status_code=501, detail="Not available in dev mode")
 
 
 @router.post("/refresh", response_model=LoginResponse)
-async def refresh_token(refresh_token: str):
+async def refresh_token(token_body: dict):
     """
     Issue a new access token using a valid refresh token.
     """
-    # TODO: Implement
-    raise NotImplementedError("TODO: implement refresh_token")
+    refresh = token_body.get("refresh_token", "")
+    payload = decode_token(refresh)
+    if payload is None or payload.get("type") != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
+
+    user = User(
+        id=payload["sub"],
+        email=payload.get("email", ""),
+        display_name="Admin",
+        role=payload.get("role", "admin"),
+        email_verified=True,
+    )
+    return LoginResponse(
+        access_token=create_access_token(user),
+        refresh_token=create_refresh_token(user),
+        token_type="bearer",
+        user=_user_to_response(user),
+        is_new_user=False,
+    )
 
 
 @router.get(
@@ -147,7 +163,7 @@ async def get_me(user: User = Depends(require_current_user)):
 
     Useful for session validation on page load.
     """
-    # TODO: Return real user data
+    return _user_to_response(user)
     return UserResponse(
         id=user.id,
         email=user.email,

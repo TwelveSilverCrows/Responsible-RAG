@@ -1,9 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useState } from 'react';
 import { Toaster } from '@/components/ui/sonner';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { ThemeProvider } from '@/lib/themeProvider';
+import { Providers } from '@/components/Providers';
 
 // Lazy-load pages for better performance
 import { lazy, Suspense } from 'react';
@@ -38,31 +36,18 @@ function PageLoader() {
 }
 
 export default function App() {
-  const [queryClient] = useState(
-    () =>
-      new QueryClient({
-        defaultOptions: {
-          queries: {
-            staleTime: 60 * 1000,
-            retry: 1,
-          },
-        },
-      })
-  );
-
   return (
-    <QueryClientProvider client={queryClient}>
-      <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
-        <ErrorBoundary>
-          <BrowserRouter>
-            <Suspense fallback={<PageLoader />}>
-              <Routes>
-                <Route path="/" element={<Home />} />
-                <Route path="/login" element={<LoginPage />} />
-                <Route path="/register" element={<RegisterPage />} />
-                <Route path="/auth/verify-email" element={<VerifyEmailPage />} />
-                <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
-                <Route path="/chat" element={<ChatPage />} />
+    <Providers>
+      <ErrorBoundary>
+        <BrowserRouter>
+          <Suspense fallback={<PageLoader />}>
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/register" element={<RegisterPage />} />
+              <Route path="/auth/verify-email" element={<VerifyEmailPage />} />
+              <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
+              <Route path="/chat" element={<ChatPage />} />
                 <Route path="/chat/:conversationId" element={<ConversationPage />} />
                 <Route path="/onboarding/welcome" element={<OnboardingWelcome />} />
                 <Route path="/onboarding/consent" element={<OnboardingConsent />} />
@@ -80,7 +65,6 @@ export default function App() {
           </BrowserRouter>
           <Toaster richColors position="bottom-right" />
         </ErrorBoundary>
-      </ThemeProvider>
-    </QueryClientProvider>
+    </Providers>
   );
 }

@@ -5,7 +5,7 @@ import { persist } from 'zustand/middleware';
 
 type UserRole = 'client' | 'admin';
 
-interface AuthUser {
+export interface AuthUser {
   id: string;
   email: string;
   displayName: string;
@@ -15,11 +15,13 @@ interface AuthUser {
 
 interface AuthStore {
   user: AuthUser | null;
+  token: string | undefined;
+  refreshToken: string | undefined;
   isAuthenticated: boolean;
   isLoading: boolean;
   onboardingCompleted: boolean;
-  login: (user: AuthUser) => void;
-  loginAsNewUser: (user: AuthUser) => void;
+  login: (user: AuthUser, token: string, refreshToken?: string) => void;
+  loginAsNewUser: (user: AuthUser, token: string, refreshToken?: string) => void;
   logout: () => void;
   setLoading: (loading: boolean) => void;
   completeOnboarding: () => void;
@@ -30,34 +32,41 @@ export const useAuthStore = create<AuthStore>()(
   persist(
     (set) => ({
       user: null,
+      token: undefined,
+      refreshToken: undefined,
       isAuthenticated: false,
       isLoading: false,
       onboardingCompleted: false,
 
-      login: (user) =>
+      login: (user, token, refreshToken) =>
         set({
           user,
+          token,
+          refreshToken,
           isAuthenticated: true,
           isLoading: false,
-          onboardingCompleted: true, // Existing user — already onboarded
+          onboardingCompleted: true,
         }),
 
-      loginAsNewUser: (user) =>
+      loginAsNewUser: (user, token, refreshToken) =>
         set({
           user,
+          token,
+          refreshToken,
           isAuthenticated: true,
           isLoading: false,
-          onboardingCompleted: false, // New user — needs onboarding
+          onboardingCompleted: false,
         }),
 
       logout: () => {
         set({
           user: null,
+          token: undefined,
+          refreshToken: undefined,
           isAuthenticated: false,
           isLoading: false,
           onboardingCompleted: false,
         });
-        // Clear other persisted stores on logout
         if (typeof window !== 'undefined') {
           try {
             localStorage.removeItem('profile-store');
@@ -76,6 +85,8 @@ export const useAuthStore = create<AuthStore>()(
       reset: () =>
         set({
           user: null,
+          token: undefined,
+          refreshToken: undefined,
           isAuthenticated: false,
           isLoading: false,
           onboardingCompleted: false,

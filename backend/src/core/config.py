@@ -31,14 +31,21 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.2
     deepseek_api_key: str = ""
 
-    # ── Embeddings ────────────────────────────────────────────────────────────
-    # Auto-detected: OpenVINO will auto-detect Intel CPU/NPU/GPU at runtime.
-    # Set USE_NOMIC=true to force Nomic embedding backend instead.
+    # ── Embeddings (Hugging Face Inference API) ───────────────────────────────
     embedding_model: str = "BAAI/bge-large-en-v1.5"
-    embedding_device: str = "CPU"          # Fallback if auto-detection fails
-    embedding_normalize: bool = True
-    use_nomic: bool = False                # Force Nomic (bypasses auto-detection)
-    nomic_dimensionality: int = 512
+    huggingfacehub_api_token: str = ""     # hf_… token with inference permission
+
+    # ── Dev Auth ───────────────────────────────────────────────────────────
+    auth_secret_key: str = "dev-secret-change-in-production-0123456789"
+    auth_algorithm: str = "HS256"
+    auth_token_expire_minutes: int = 1440        # 24 hours
+    dummy_admin_email: str = "admin"
+    dummy_admin_password: str = "admin123"
+
+    # ── Google OAuth ──────────────────────────────────────────────────────
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = "http://localhost:8000/api/v1/auth/google/callback"
 
     # ── Chunking ──────────────────────────────────────────────────────────────
     use_semantic_chunking: bool = True
@@ -53,9 +60,17 @@ class Settings(BaseSettings):
     vec_weight: float = 0.7                # Must sum to 1.0 with bm25_weight
     bm25_weight: float = 0.3
 
+    # ── MongoDB ───────────────────────────────────────────────────────────────
+    mongo_uri: str = ""
+    mongo_db: str = "responsible_rag"
+
+    # ── Vector store (TurboVec) ──────────────────────────────────────────────
+    vectordb_dir: str = "./vectordb"
+    turbovec_bit_width: int = 4            # 2 or 4; higher = better quality
+
     # ── Storage paths ─────────────────────────────────────────────────────────
-    chroma_persist_dir: str = "./chroma_db"
     resources_dir: str = "./resources"
+    upload_dir: str = "./uploads"
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -15,6 +15,7 @@ LABEL description="Canadian Academic RAG Chatbot — FastAPI"
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         curl \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv
@@ -45,7 +46,7 @@ COPY backend/app.py .
 COPY backend/src/ ./src/
 
 # Create volume mount points
-RUN mkdir -p /app/resources /app/chroma_db
+RUN mkdir -p /app/resources /app/vectordb
 
 EXPOSE 8000
 

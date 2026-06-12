@@ -38,8 +38,9 @@ export default function VerifyEmailPage() {
   function handleVerify() {
     // Mock verification — mark the user as verified
     const user = useAuthStore.getState().user;
+    const token = useAuthStore.getState().token;
     if (user) {
-      login({ ...user, emailVerified: true });
+      login({ ...user, emailVerified: true }, token ?? 'mock-token');
     }
     setIsVerified(true);
   }

@@ -17,6 +17,17 @@ class CitationSchema(BaseModel):
 
     id: str = Field(..., description="Citation ID.")
     source_id: str = Field(..., description="Source document ID.")
+    source_title: str = Field("", description="Document title.")
+    source_type: str = Field("pdf", description="Type of source (pdf, text, webpage, etc.).")
+    authors: list[str] = Field(default_factory=list, description="Author names.")
+    publication_date: Optional[str] = Field(None, description="Publication date (ISO-8601).")
+    publisher: Optional[str] = Field(None, description="Publisher name.")
+    url: str = Field("", description="Source URL.")
+    doi: str = Field("", description="Digital Object Identifier.")
+    language: Optional[str] = Field(None, description="Language code (e.g. 'en', 'fr').")
+    description: Optional[str] = Field(None, description="Document summary.")
+    tags: list[str] = Field(default_factory=list, description="Tags / keywords.")
+    content_sensitivity: str = Field("low", description="'low', 'medium', or 'high'.")
     excerpt: str = Field(..., description="Relevant excerpt from the source.")
     number: int = Field(..., description="Citation number (rendered as [1], [2], etc.).")
 

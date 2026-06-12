@@ -37,7 +37,7 @@ services:
       - .env
     volumes:
       - ./resources:/app/resources:ro
-      - ./chroma_db:/app/chroma_db
+      - ./vectordb:/app/vectordb
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8000/api/v1/health"]
@@ -68,6 +68,6 @@ services:
 # Volumes
 # =============================================================================
 volumes:
-  chroma_db:
+  vectordb:
   caddy_data:
   caddy_config:

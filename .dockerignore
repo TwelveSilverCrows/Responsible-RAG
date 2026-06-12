@@ -43,7 +43,7 @@ htmlcov
 .env
 
 # Local data — mounted as volumes at runtime instead
-chroma_db
+vectordb
 resources
 
 # Docs

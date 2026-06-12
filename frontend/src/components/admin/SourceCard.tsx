@@ -56,7 +56,6 @@ export function SourceCard({ source }: SourceCardProps) {
             </Badge>
             <ProcessingStatus
               status={source.status}
-              indexedAt={source.indexedAt}
               errorMessage={source.errorMessage}
             />
           </div>

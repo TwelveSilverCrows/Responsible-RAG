@@ -7,6 +7,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2, Eye, EyeOff, Shield, UserPlus, Lock } from 'lucide-react';
 
 import { useAuthStore } from '@/hooks/useAuth';
+import { api } from '@/lib/api';
 import { loginSchema, type LoginFormData } from '@/lib/schemas/profile.schema';
 import { useProfileStore } from '@/stores/profileStore';
 import { useConsentStore } from '@/stores/consentStore';
@@ -44,78 +45,92 @@ export function LoginForm() {
 
   async function onSubmit(data: LoginFormData) {
     setIsSubmitting(true);
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    try {
+      const res = await api.auth.login({
+        email: data.email,
+        password: data.password,
+      });
 
-    login({
-      id: 'mock-user-1',
-      email: data.email,
-      displayName: data.email.split('@')[0],
-      role: 'client',
-      emailVerified: true,
-    });
+      login(
+        {
+          id: res.user.id,
+          email: res.user.email,
+          displayName: res.user.display_name,
+          role: res.user.role,
+          emailVerified: res.user.email_verified,
+        },
+        res.access_token,
+        res.refresh_token,
+      );
 
-    // Seed general mode for email logins
-    seedGeneralDemo({ profileStore, consentStore });
+      // Seed demo data for a smooth experience
+      seedGeneralDemo({ profileStore, consentStore });
 
-    navigate('/chat');
-  }
-
-  function handleGoogleLogin() {
-    login({
-      id: 'mock-google-user-1',
-      email: 'user@gmail.com',
-      displayName: 'Google User',
-      role: 'client',
-      emailVerified: true,
-    });
-    seedGeneralDemo({ profileStore, consentStore });
-    navigate('/chat');
+      navigate(res.user.role === 'admin' ? '/admin' : '/chat');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Login failed';
+      form.setError('root', { message: msg });
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   function handleDemoClientLogin() {
-    login({
-      id: 'demo-client',
-      email: 'demo@responsible-ai.org',
-      displayName: 'Alex',
-      role: 'client',
-      emailVerified: true,
-    });
+    login(
+      {
+        id: 'demo-client',
+        email: 'demo@responsible-ai.org',
+        displayName: 'Alex',
+        role: 'client',
+        emailVerified: true,
+      },
+      'mock-token',
+    );
     seedClientDemo({ profileStore, consentStore });
     navigate('/chat');
   }
 
   function handleDemoAdminLogin() {
-    login({
-      id: 'demo-admin',
-      email: 'admin@responsible-ai.org',
-      displayName: 'Admin',
-      role: 'admin',
-      emailVerified: true,
-    });
+    login(
+      {
+        id: 'demo-admin',
+        email: 'admin@responsible-ai.org',
+        displayName: 'Admin',
+        role: 'admin',
+        emailVerified: true,
+      },
+      'mock-token',
+    );
     seedAdminDemo({ profileStore, consentStore });
     navigate('/admin');
   }
 
   function handleDemoGeneralLogin() {
-    login({
-      id: 'demo-general',
-      email: 'guest@responsible-ai.org',
-      displayName: 'Guest',
-      role: 'client',
-      emailVerified: true,
-    });
+    login(
+      {
+        id: 'demo-general',
+        email: 'guest@responsible-ai.org',
+        displayName: 'Guest',
+        role: 'client',
+        emailVerified: true,
+      },
+      'mock-token',
+    );
     seedGeneralDemo({ profileStore, consentStore });
     navigate('/chat');
   }
 
   function handleNewUserDemo() {
-    loginAsNewUser({
-      id: 'demo-new-user',
-      email: 'newuser@responsible-ai.org',
-      displayName: 'New User',
-      role: 'client',
-      emailVerified: false,
-    });
+    loginAsNewUser(
+      {
+        id: 'demo-new-user',
+        email: 'newuser@responsible-ai.org',
+        displayName: 'New User',
+        role: 'client',
+        emailVerified: false,
+      },
+      'mock-token',
+    );
     clearDemoData({ profileStore, consentStore });
     navigate('/onboarding/welcome');
   }
@@ -178,7 +193,7 @@ export function LoginForm() {
         </p>
       </div>
 
-      <GoogleOAuthButton mode="signin" onClick={handleGoogleLogin} />
+      <GoogleOAuthButton mode="signin" />
 
       <div className="relative">
         <Separator />
@@ -249,6 +264,12 @@ export function LoginForm() {
               </FormItem>
             )}
           />
+
+          {form.formState.errors.root && (
+            <p className="text-sm text-destructive text-center">
+              {form.formState.errors.root.message}
+            </p>
+          )}
 
           <Button
             type="submit"

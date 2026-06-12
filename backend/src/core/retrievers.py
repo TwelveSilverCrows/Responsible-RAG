@@ -67,6 +67,13 @@ class RetrieverFactory:
         EnsembleRetriever
             Ready-to-use ensemble retriever.
         """
+        if not all_docs:
+            logger.warning(
+                "No documents in the vector store — BM25 retriever will be "
+                "disabled; using vector-only retrieval."
+            )
+            return vec_retriever
+
         bm25 = BM25Retriever.from_documents(
             all_docs,
             search_kwargs={"k": settings.bm25_retriever_k},

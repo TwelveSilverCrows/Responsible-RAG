@@ -71,7 +71,7 @@ export function useChat() {
         profile_key: profileKey,
       });
 
-      // Add assistant message
+      // Add assistant message with rich source metadata
       store.addMessage({
         id: result.message_id,
         conversationId: result.conversation_id,
@@ -80,7 +80,24 @@ export function useChat() {
         citations: result.sources.map((s) => ({
           id: s.id,
           sourceId: s.source_id,
-          source: { authors: [], tags: [] } as any, // populated lazily from citation card
+          source: {
+            id: s.source_id,
+            title: s.source_title,
+            type: s.source_type as any,
+            authors: s.authors,
+            publicationDate: s.publication_date ?? null,
+            publisher: s.publisher ?? null,
+            url: s.url || '',
+            doi: s.doi || null,
+            language: s.language ?? null,
+            description: s.description ?? null,
+            tags: s.tags ?? [],
+            contentSensitivity: (s.content_sensitivity as any) ?? 'low',
+            internalNotes: null,
+            status: 'indexed' as any,
+            errorMessage: null,
+            chunkCount: 0,
+          },
           excerpt: s.excerpt,
           number: s.number,
         })),

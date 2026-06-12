@@ -1,4 +1,4 @@
-import type { Source, SourceType, SourceStatus } from '@/types/source';
+import type { Source, SourceType } from '@/types/source';
 
 export const mockSources: Source[] = [
   {
@@ -8,7 +8,7 @@ export const mockSources: Source[] = [
     authors: ['Dr. Sarah Chen', 'Prof. Michael Torres'],
     publicationDate: '2025-03-15',
     publisher: 'AI Ethics Press',
-    url: null,
+    url: '',
     doi: '10.1234/rai-2025-001',
     language: 'en',
     description:
@@ -18,11 +18,7 @@ export const mockSources: Source[] = [
     internalNotes: 'Updated version with new Chapter 7 on bias mitigation.',
     status: 'indexed',
     errorMessage: null,
-    indexedAt: '2025-06-01T10:30:00Z',
-    createdAt: '2025-05-28T14:00:00Z',
-    updatedAt: '2025-06-01T10:30:00Z',
-    filePath: '/uploads/responsible-ai-guide.pdf',
-    thumbnailUrl: null,
+    chunkCount: 387,
   },
   {
     id: 'src-002',
@@ -40,11 +36,7 @@ export const mockSources: Source[] = [
     internalNotes: 'Contains proprietary benchmark data — restrict access to senior researchers.',
     status: 'indexed',
     errorMessage: null,
-    indexedAt: '2025-05-30T08:15:00Z',
-    createdAt: '2025-05-29T09:00:00Z',
-    updatedAt: '2025-05-30T08:15:00Z',
-    filePath: '/uploads/rag-systems.pdf',
-    thumbnailUrl: null,
+    chunkCount: 245,
   },
   {
     id: 'src-003',
@@ -60,13 +52,9 @@ export const mockSources: Source[] = [
     tags: ['Privacy', 'Data Protection', 'Design'],
     contentSensitivity: 'low',
     internalNotes: null,
-    status: 'processing',
+    status: 'indexed',
     errorMessage: null,
-    indexedAt: null,
-    createdAt: '2025-06-03T11:20:00Z',
-    updatedAt: '2025-06-03T11:20:00Z',
-    filePath: null,
-    thumbnailUrl: null,
+    chunkCount: 15,
   },
   {
     id: 'src-004',
@@ -75,7 +63,7 @@ export const mockSources: Source[] = [
     authors: ['Compliance Team'],
     publicationDate: '2025-05-01',
     publisher: null,
-    url: null,
+    url: '',
     doi: null,
     language: 'en',
     description: 'Internal governance policy document outlining the organizational AI ethics review process and compliance requirements.',
@@ -84,11 +72,7 @@ export const mockSources: Source[] = [
     internalNotes: 'Board-approved version. Do not share externally.',
     status: 'indexed',
     errorMessage: null,
-    indexedAt: '2025-06-02T16:45:00Z',
-    createdAt: '2025-06-01T10:00:00Z',
-    updatedAt: '2025-06-02T16:45:00Z',
-    filePath: '/uploads/ai-governance-v3.md',
-    thumbnailUrl: null,
+    chunkCount: 156,
   },
   {
     id: 'src-005',
@@ -104,13 +88,9 @@ export const mockSources: Source[] = [
     tags: ['NLP', 'Deep Learning', 'Education'],
     contentSensitivity: 'low',
     internalNotes: null,
-    status: 'queued',
+    status: 'processing',
     errorMessage: null,
-    indexedAt: null,
-    createdAt: '2025-06-04T09:00:00Z',
-    updatedAt: '2025-06-04T09:00:00Z',
-    filePath: null,
-    thumbnailUrl: 'https://img.youtube.com/vi/rmVRLeJRQn4/hqdefault.jpg',
+    chunkCount: 48,
   },
   {
     id: 'src-006',
@@ -119,7 +99,7 @@ export const mockSources: Source[] = [
     authors: ['Tech Talks Podcast', 'Dr. Lisa Wang'],
     publicationDate: '2025-05-22',
     publisher: 'Tech Talks Network',
-    url: null,
+    url: '',
     doi: null,
     language: 'en',
     description: 'A podcast interview with Dr. Lisa Wang discussing the future direction of conversational AI and ethical considerations.',
@@ -127,12 +107,8 @@ export const mockSources: Source[] = [
     contentSensitivity: 'low',
     internalNotes: 'Transcription completed. Needs review for accuracy.',
     status: 'error',
-    errorMessage: 'Audio transcription failed: unsupported codec. Please re-upload in MP3 or WAV format.',
-    indexedAt: null,
-    createdAt: '2025-06-02T15:30:00Z',
-    updatedAt: '2025-06-03T07:00:00Z',
-    filePath: '/uploads/interview-conversational-ai.m4a',
-    thumbnailUrl: null,
+    errorMessage: 'Audio transcription failed: unsupported codec.',
+    chunkCount: 32,
   },
   {
     id: 'src-007',
@@ -150,11 +126,7 @@ export const mockSources: Source[] = [
     internalNotes: null,
     status: 'processing',
     errorMessage: null,
-    indexedAt: null,
-    createdAt: '2025-06-04T13:45:00Z',
-    updatedAt: '2025-06-04T13:45:00Z',
-    filePath: '/uploads/bias-detection-lm.pdf',
-    thumbnailUrl: null,
+    chunkCount: 210,
   },
   {
     id: 'src-008',
@@ -172,61 +144,9 @@ export const mockSources: Source[] = [
     internalNotes: null,
     status: 'indexed',
     errorMessage: null,
-    indexedAt: '2025-05-25T12:00:00Z',
-    createdAt: '2025-05-24T18:00:00Z',
-    updatedAt: '2025-05-25T12:00:00Z',
-    filePath: null,
-    thumbnailUrl: 'https://img.youtube.com/vi/zd89r4e4OM4/hqdefault.jpg',
+    chunkCount: 342,
   },
 ];
-
-export const mockProcessingLogs: Record<string, { timestamp: string; message: string }[]> = {
-  'src-001': [
-    { timestamp: '2025-05-28T14:00:00Z', message: 'File uploaded successfully' },
-    { timestamp: '2025-05-28T14:00:30Z', message: 'Queued for processing' },
-    { timestamp: '2025-05-28T14:01:00Z', message: 'Extracting text from PDF (42 pages)' },
-    { timestamp: '2025-05-28T14:03:00Z', message: 'Text extraction complete' },
-    { timestamp: '2025-05-28T14:03:30Z', message: 'Generating embeddings' },
-    { timestamp: '2025-06-01T10:30:00Z', message: 'Indexing complete — 42 pages, 387 chunks indexed' },
-  ],
-  'src-002': [
-    { timestamp: '2025-05-29T09:00:00Z', message: 'File uploaded successfully' },
-    { timestamp: '2025-05-29T09:00:30Z', message: 'Queued for processing' },
-    { timestamp: '2025-05-29T09:01:00Z', message: 'Extracting text from PDF (28 pages)' },
-    { timestamp: '2025-05-30T08:15:00Z', message: 'Indexing complete — 28 pages, 245 chunks indexed' },
-  ],
-  'src-003': [
-    { timestamp: '2025-06-03T11:20:00Z', message: 'URL submitted for crawling' },
-    { timestamp: '2025-06-03T11:20:30Z', message: 'Crawling webpage content...' },
-    { timestamp: '2025-06-03T11:21:00Z', message: 'Generating embeddings...' },
-  ],
-  'src-004': [
-    { timestamp: '2025-06-01T10:00:00Z', message: 'File uploaded successfully' },
-    { timestamp: '2025-06-01T10:00:30Z', message: 'Queued for processing' },
-    { timestamp: '2025-06-01T10:01:00Z', message: 'Parsing markdown content' },
-    { timestamp: '2025-06-02T16:45:00Z', message: 'Indexing complete — 156 chunks indexed' },
-  ],
-  'src-005': [
-    { timestamp: '2025-06-04T09:00:00Z', message: 'YouTube URL submitted' },
-    { timestamp: '2025-06-04T09:00:30Z', message: 'Queued for processing' },
-  ],
-  'src-006': [
-    { timestamp: '2025-06-02T15:30:00Z', message: 'File uploaded successfully' },
-    { timestamp: '2025-06-02T15:31:00Z', message: 'Starting audio transcription' },
-    { timestamp: '2025-06-03T07:00:00Z', message: 'Error: Audio transcription failed — unsupported codec' },
-  ],
-  'src-007': [
-    { timestamp: '2025-06-04T13:45:00Z', message: 'File uploaded successfully' },
-    { timestamp: '2025-06-04T13:45:30Z', message: 'Extracting text from PDF (67 pages)' },
-    { timestamp: '2025-06-04T13:48:00Z', message: 'Generating embeddings...' },
-  ],
-  'src-008': [
-    { timestamp: '2025-05-24T18:00:00Z', message: 'YouTube URL submitted' },
-    { timestamp: '2025-05-24T18:01:00Z', message: 'Fetching transcript' },
-    { timestamp: '2025-05-24T18:02:00Z', message: 'Generating embeddings' },
-    { timestamp: '2025-05-25T12:00:00Z', message: 'Indexing complete — 342 chunks indexed' },
-  ],
-};
 
 export function getSourceById(id: string): Source | undefined {
   return mockSources.find((s) => s.id === id);
@@ -234,8 +154,4 @@ export function getSourceById(id: string): Source | undefined {
 
 export function getSourcesByType(type: SourceType): Source[] {
   return mockSources.filter((s) => s.type === type);
-}
-
-export function getSourcesByStatus(status: SourceStatus): Source[] {
-  return mockSources.filter((s) => s.status === status);
 }

@@ -67,26 +67,32 @@ export function RegisterForm() {
     // Simulate network delay
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
-    loginAsNewUser({
-      id: 'mock-user-new',
-      email: data.email,
-      displayName: data.displayName,
-      role: 'client',
-      emailVerified: false,
-    });
+    loginAsNewUser(
+      {
+        id: 'mock-user-new',
+        email: data.email,
+        displayName: data.displayName,
+        role: 'client',
+        emailVerified: false,
+      },
+      'mock-token',
+    );
     resetConsent(); // Fresh consent state for new user
 
     navigate('/onboarding/welcome');
   }
 
   function handleGoogleSignup() {
-    loginAsNewUser({
-      id: 'mock-google-user-new',
-      email: 'user@gmail.com',
-      displayName: 'Google User',
-      role: 'client',
-      emailVerified: true,
-    });
+    loginAsNewUser(
+      {
+        id: 'mock-google-user-new',
+        email: 'user@gmail.com',
+        displayName: 'Google User',
+        role: 'client',
+        emailVerified: true,
+      },
+      'mock-token',
+    );
     resetConsent();
     navigate('/onboarding/welcome');
   }
@@ -102,7 +108,7 @@ export function RegisterForm() {
         </p>
       </div>
 
-      <GoogleOAuthButton mode="signup" onClick={handleGoogleSignup} />
+      <GoogleOAuthButton mode="signup" />
 
       <div className="relative">
         <Separator />

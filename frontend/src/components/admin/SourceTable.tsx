@@ -55,9 +55,11 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { ProcessingStatus } from '@/components/admin/ProcessingStatus';
-import type { Source, SourceType, SourceStatus } from '@/types/source';
+import type { Source, SourceType } from '@/types/source';
 import { SOURCE_TYPE_CONFIG } from '@/types/source';
+import { api } from '@/lib/api';
 import { format } from 'date-fns';
+import { toast } from 'sonner';
 
 const typeIcons: Record<SourceType, React.ElementType> = {
   pdf: FileText,
@@ -67,21 +69,21 @@ const typeIcons: Record<SourceType, React.ElementType> = {
   youtube: Youtube,
 };
 
-type SortField = 'title' | 'type' | 'publicationDate' | 'createdAt';
+type SortField = 'title' | 'type' | 'publicationDate';
 type SortDir = 'asc' | 'desc';
 
 const ITEMS_PER_PAGE = 10;
 
 interface SourceTableProps {
   sources: Source[];
+  onRefresh?: () => void;
 }
 
-export function SourceTable({ sources }: SourceTableProps) {
+export function SourceTable({ sources, onRefresh }: SourceTableProps) {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [sortField, setSortField] = useState<SortField>('createdAt');
+  const [sortField, setSortField] = useState<SortField>('publicationDate');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
@@ -106,11 +108,6 @@ export function SourceTable({ sources }: SourceTableProps) {
       result = result.filter((s) => s.type === typeFilter);
     }
 
-    // Status filter
-    if (statusFilter !== 'all') {
-      result = result.filter((s) => s.status === statusFilter);
-    }
-
     // Sort
     result.sort((a, b) => {
       let cmp = 0;
@@ -124,15 +121,12 @@ export function SourceTable({ sources }: SourceTableProps) {
         case 'publicationDate':
           cmp = (a.publicationDate || '').localeCompare(b.publicationDate || '');
           break;
-        case 'createdAt':
-          cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-          break;
       }
       return sortDir === 'asc' ? cmp : -cmp;
     });
 
     return result;
-  }, [sources, search, typeFilter, statusFilter, sortField, sortDir]);
+  }, [sources, search, typeFilter, sortField, sortDir]);
 
   // Pagination
   const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
@@ -184,15 +178,33 @@ export function SourceTable({ sources }: SourceTableProps) {
     });
   };
 
-  const handleBulkDelete = () => {
-    // In a real app, this would call an API
-    setSelectedIds(new Set());
-    setDeleteDialogOpen(false);
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedIds);
+    try {
+      await Promise.all(ids.map((id) => api.sources.delete(id)));
+      toast.success(`Deleted ${ids.length} source(s)`);
+      setSelectedIds(new Set());
+      onRefresh?.();
+    } catch (err) {
+      toast.error('Failed to delete some sources');
+    } finally {
+      setDeleteDialogOpen(false);
+    }
   };
 
-  const handleRetry = (id: string) => {
-    // Mock retry — in a real app, this would call an API
-    void id;
+  const handleDeleteSingle = async (id: string) => {
+    try {
+      await api.sources.delete(id);
+      toast.success('Source deleted');
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      onRefresh?.();
+    } catch (err) {
+      toast.error('Failed to delete source');
+    }
   };
 
   return (
@@ -230,24 +242,6 @@ export function SourceTable({ sources }: SourceTableProps) {
             ))}
           </SelectContent>
         </Select>
-        <Select
-          value={statusFilter}
-          onValueChange={(v) => {
-            setStatusFilter(v);
-            setPage(1);
-          }}
-        >
-          <SelectTrigger className="w-full sm:w-[180px]">
-            <SelectValue placeholder="All statuses" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All statuses</SelectItem>
-            <SelectItem value="queued">Queued</SelectItem>
-            <SelectItem value="processing">Processing</SelectItem>
-            <SelectItem value="indexed">Indexed</SelectItem>
-            <SelectItem value="error">Error</SelectItem>
-          </SelectContent>
-        </Select>
         {selectedIds.size > 0 && (
           <Button
             variant="destructive"
@@ -268,11 +262,11 @@ export function SourceTable({ sources }: SourceTableProps) {
           </div>
           <h3 className="text-lg font-semibold mb-1">No sources found</h3>
           <p className="text-sm text-muted-foreground mb-4">
-            {search || typeFilter !== 'all' || statusFilter !== 'all'
+            {search || typeFilter !== 'all'
               ? 'Try adjusting your filters or search terms.'
               : 'Start building your knowledge base by adding your first source.'}
           </p>
-          {!search && typeFilter === 'all' && statusFilter === 'all' && (
+          {!search && typeFilter === 'all' && (
             <Button asChild>
               <Link to="/admin/sources/new">
                 <Plus className="w-4 h-4 mr-2" />
@@ -328,15 +322,8 @@ export function SourceTable({ sources }: SourceTableProps) {
                       Published {renderSortIcon('publicationDate')}
                     </button>
                   </TableHead>
-                  <TableHead className="hidden lg:table-cell">
-                    <button
-                      className="flex items-center gap-0.5 hover:text-foreground transition-colors"
-                      onClick={() => toggleSort('createdAt')}
-                    >
-                      Added {renderSortIcon('createdAt')}
-                    </button>
-                  </TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead className="hidden lg:table-cell">Chunks</TableHead>
                   <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
@@ -380,20 +367,14 @@ export function SourceTable({ sources }: SourceTableProps) {
                           ? format(new Date(source.publicationDate), 'MMM d, yyyy')
                           : '—'}
                       </TableCell>
-                      <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">
-                        {format(new Date(source.createdAt), 'MMM d, yyyy')}
-                      </TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <ProcessingStatus
                           status={source.status}
-                          indexedAt={source.indexedAt}
                           errorMessage={source.errorMessage}
-                          onRetry={
-                            source.status === 'error'
-                              ? () => handleRetry(source.id)
-                              : undefined
-                          }
                         />
+                      </TableCell>
+                      <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">
+                        {source.chunkCount}
                       </TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <DropdownMenu>
@@ -415,7 +396,10 @@ export function SourceTable({ sources }: SourceTableProps) {
                               <Pencil className="w-4 h-4 mr-2" /> Edit
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem className="text-destructive focus:text-destructive">
+                            <DropdownMenuItem
+                              className="text-destructive focus:text-destructive"
+                              onClick={() => handleDeleteSingle(source.id)}
+                            >
                               <Trash2 className="w-4 h-4 mr-2" /> Delete
                             </DropdownMenuItem>
                           </DropdownMenuContent>

@@ -1,8 +1,8 @@
 export type SourceType = 'pdf' | 'text' | 'audio' | 'webpage' | 'youtube';
 
-export type SourceStatus = 'queued' | 'processing' | 'indexed' | 'error';
-
 export type ContentSensitivity = 'low' | 'medium' | 'high';
+
+export type SourceStatus = 'processing' | 'indexed' | 'error';
 
 export interface Source {
   id: string;
@@ -11,7 +11,7 @@ export interface Source {
   authors: string[];
   publicationDate: string | null;
   publisher: string | null;
-  url: string | null;
+  url: string;
   doi: string | null;
   language: string | null;
   description: string | null;
@@ -20,11 +20,7 @@ export interface Source {
   internalNotes: string | null;
   status: SourceStatus;
   errorMessage: string | null;
-  indexedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  filePath: string | null;
-  thumbnailUrl: string | null;
+  chunkCount: number;
 }
 
 export const SOURCE_TYPE_CONFIG: Record<SourceType, { label: string; icon: string; acceptTypes: string; color: string }> = {

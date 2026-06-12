@@ -5,7 +5,7 @@ export const sourceMetadataSchema = z.object({
   authors: z.array(z.string()).min(1, 'At least one author is required'),
   publicationDate: z.string().nullable().optional(),
   publisher: z.string().nullable().optional(),
-  url: z.string().url('Please enter a valid URL').nullable().optional().or(z.literal('')),
+  url: z.string().url('Please enter a valid URL'),
   doi: z.string().nullable().optional(),
   language: z.string().nullable().optional(),
   description: z.string().nullable().optional(),

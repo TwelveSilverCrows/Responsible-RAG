@@ -1,23 +1,19 @@
 """
 services/auth_service.py — Authentication business logic
 ==========================================================
-Handles registration, login, password hashing, JWT issuance, email
-verification tokens, and Google OAuth integration.
-
-All methods are ``@staticmethod`` or free functions — no state to manage.
-
-TODO (implement these):
-    - ``hash_password(plain: str) -> str`` — bcrypt hashing.
-    - ``verify_password(plain: str, hash: str) -> bool`` — bcrypt verify.
-    - ``create_access_token(user: User) -> str`` — JWT encode.
-    - ``create_refresh_token(user: User) -> str`` — longer-lived JWT.
-    - ``decode_token(token: str) -> dict`` — JWT decode/verify.
-    - ``generate_verification_token() -> str`` — crypto-safe random token.
+Dev-mode authentication using a single dummy admin user configured
+via environment variables, plus Google OAuth ID token verification.
 """
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+
+import jwt
+import requests
+
 from src.api.db.models import User
+from src.core.config import get_settings
 
 
 @dataclass
@@ -30,15 +26,172 @@ class AuthResult:
     is_new_user: bool = False
 
 
+def _now_ts() -> int:
+    """Current UTC epoch seconds."""
+    return int(datetime.now(timezone.utc).timestamp())
+
+
+def create_access_token(user: User, auth_method: str = "password") -> str:
+    """Issue a short-lived JWT access token."""
+    settings = get_settings()
+    payload = {
+        "sub": user.id,
+        "email": user.email,
+        "role": user.role,
+        "auth_method": auth_method,
+        "iat": _now_ts(),
+        "exp": _now_ts() + settings.auth_token_expire_minutes * 60,
+    }
+    return jwt.encode(payload, settings.auth_secret_key, algorithm=settings.auth_algorithm)
+
+
+def create_refresh_token(user: User) -> str:
+    """Issue a longer-lived JWT refresh token (7 days)."""
+    settings = get_settings()
+    payload = {
+        "sub": user.id,
+        "email": user.email,
+        "role": user.role,
+        "iat": _now_ts(),
+        "exp": _now_ts() + 7 * 24 * 3600,
+        "type": "refresh",
+    }
+    return jwt.encode(payload, settings.auth_secret_key, algorithm=settings.auth_algorithm)
+
+
+def decode_token(token: str) -> dict | None:
+    """Decode and verify a JWT.  Returns the payload dict, or None if invalid."""
+    settings = get_settings()
+    try:
+        return jwt.decode(token, settings.auth_secret_key, algorithms=[settings.auth_algorithm])
+    except jwt.PyJWTError:
+        return None
+
+
+def verify_google_id_token(id_token: str) -> Optional[dict]:
+    """
+    Verify a Google ID token and return the user info payload.
+
+    Uses ``google.oauth2.id_token.verify_oauth2_token`` which fetches
+    Google's public certs and validates the token signature, audience,
+    and expiration automatically.
+
+    Also supports Google access tokens by calling Google's tokeninfo
+    endpoint as a fallback.
+
+    Returns ``None`` if verification fails.
+    """
+    # First try: verify as an ID token (JWT signed by Google)
+    try:
+        from google.oauth2 import id_token as google_id_token
+        from google.auth.transport import requests as google_requests
+
+        settings = get_settings()
+        if not settings.google_client_id:
+            return None
+
+        info = google_id_token.verify_oauth2_token(
+            id_token,
+            google_requests.Request(),
+            settings.google_client_id,
+        )
+        return info
+    except Exception:
+        pass
+
+    # Second try: verify as an access token via Google's tokeninfo endpoint
+    try:
+        import requests
+        resp = requests.get(
+            "https://www.googleapis.com/oauth2/v3/tokeninfo",
+            params={"access_token": id_token},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            # Map tokeninfo response to standard fields
+            return {
+                "sub": data.get("sub", ""),
+                "email": data.get("email", ""),
+                "name": data.get("name", ""),
+                "email_verified": data.get("email_verified") == "true",
+                "picture": data.get("picture", ""),
+            }
+    except Exception:
+        pass
+
+    return None
+
+
 class AuthService:
     """
-    Authentication service.
-
-    Usage:
-        result = AuthService.register(email="a@b.com", password="...", name="Alex")
-        # or
-        result = AuthService.login(email="a@b.com", password="...")
+    Authentication service supporting both password-based and Google OAuth login.
     """
+
+    @staticmethod
+    async def login(email: str, password: str) -> AuthResult:
+        """
+        Authenticate with email + password against the dummy admin user.
+
+        Raises ``ValueError`` if credentials don't match.
+        """
+        settings = get_settings()
+
+        if email != settings.dummy_admin_email or password != settings.dummy_admin_password:
+            raise ValueError("Invalid email or password")
+
+        user = User(
+            id="admin-dev",
+            email=email,
+            display_name="Admin",
+            role="admin",
+            email_verified=True,
+        )
+
+        return AuthResult(
+            user=user,
+            access_token=create_access_token(user),
+            refresh_token=create_refresh_token(user),
+            is_new_user=False,
+        )
+
+    @staticmethod
+    async def google_auth(id_token: str) -> AuthResult:
+        """
+        Authenticate via Google ID token.
+
+        Verifies the token with Google, then creates or returns an existing
+        user.  In dev mode, this creates a lightweight in-memory user.
+
+        Raises ``ValueError`` if the token is invalid.
+        """
+        info = verify_google_id_token(id_token)
+        if info is None:
+            raise ValueError("Invalid Google ID token")
+
+        google_id = info.get("sub", "")
+        email = info.get("email", "")
+        name = info.get("name", email.split("@")[0] if email else "Google User")
+
+        # In dev mode, create/find user from Google info
+        # (In production, look up or create in MongoDB)
+        user = User(
+            id=f"google-{google_id}",
+            email=email,
+            display_name=name,
+            role="client",
+            email_verified=info.get("email_verified", False),
+            google_id=google_id,
+        )
+
+        # TODO: store/retrieve user in MongoDB when available
+
+        return AuthResult(
+            user=user,
+            access_token=create_access_token(user, auth_method="google"),
+            refresh_token=create_refresh_token(user),
+            is_new_user=True,
+        )
 
     @staticmethod
     async def register(
@@ -46,75 +199,10 @@ class AuthService:
         password: str,
         display_name: str,
     ) -> AuthResult:
-        """
-        Register a new user account.
-
-        1. Check email uniqueness.
-        2. Hash password.
-        3. Insert User document.
-        4. Generate verification token.
-        5. Issue JWT pair.
-        6. (Optionally) send verification email.
-
-        Returns AuthResult with tokens + is_new_user=True.
-        """
-        # TODO: Implement
-        # existing = await users_repo.find_one({"email": email})
-        # if existing:
-        #     raise HTTPException(409, "Email already registered")
-        # hashed = hash_password(password)
-        # user = User(email=email, password_hash=hashed, display_name=display_name)
-        # user_id = await users_repo.insert_one(user)
-        # token = create_access_token(user)
-        # ...
-        raise NotImplementedError("TODO: implement register")
-
-    @staticmethod
-    async def login(email: str, password: str) -> AuthResult:
-        """
-        Authenticate with email + password.
-
-        1. Look up user by email.
-        2. Verify password hash.
-        3. Issue JWT pair.
-        """
-        # TODO: Implement
-        raise NotImplementedError("TODO: implement login")
-
-    @staticmethod
-    async def google_auth(id_token: str) -> AuthResult:
-        """
-        Authenticate or register via Google OAuth.
-
-        1. Verify the Google ID token.
-        2. Extract email, name, google_id from payload.
-        3. If user exists by google_id or email → login.
-        4. Otherwise → create new user.
-        """
-        # TODO: Implement
-        raise NotImplementedError("TODO: implement google_auth")
+        """Register is not available in dev mode."""
+        raise NotImplementedError("Registration is not available in dev mode")
 
     @staticmethod
     async def verify_email(token: str) -> bool:
-        """
-        Verify a user's email address using a verification token.
-        """
-        # TODO: Implement
-        raise NotImplementedError("TODO: implement verify_email")
-
-    @staticmethod
-    async def request_password_reset(email: str) -> bool:
-        """
-        Generate a reset token and (optionally) email it to the user.
-        Always returns True to prevent email enumeration.
-        """
-        # TODO: Implement
-        raise NotImplementedError("TODO: implement request_password_reset")
-
-    @staticmethod
-    async def set_new_password(token: str, new_password: str) -> bool:
-        """
-        Validate reset token and update the password.
-        """
-        # TODO: Implement
-        raise NotImplementedError("TODO: implement set_new_password")
+        """Email verification is not available in dev mode."""
+        raise NotImplementedError("Email verification is not available in dev mode")

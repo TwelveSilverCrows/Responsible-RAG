@@ -6,10 +6,10 @@ A **Retrieval-Augmented Generation (RAG)** chatbot tailored for Canadian academi
 
 ## Features
 
-- **Hybrid retrieval** — ensemble of Chroma (vector similarity) + BM25 (keyword), weighted 70/30
+- **Hybrid retrieval** — ensemble of TurboVec (vector similarity) + BM25 (keyword), weighted 70/30
 - **Smart chunking** — semantic-first via `SemanticChunker`, with automatic recursive fallback
 - **Population profiles** — four research-cited system-prompt personas (`RAGPopulation`)
-- **Swappable embeddings** — OpenVINO (Intel CPU/NPU) or Nomic Embed via a single env flag
+- **Cloud embeddings** — Hugging Face Inference API (same BAAI/bge-large-en-v1.5 model, zero local deps)
 - **Clean architecture** — UI, core logic, profiles, and config are fully decoupled
 - **Docker-ready** — full `docker compose` setup for the entire stack
 - **API-expansion-ready** — `src/core` is framework-agnostic; add FastAPI without touching business logic
@@ -110,7 +110,7 @@ rag-chatbot/
 │       │   ├── profiles.py        # Audience-specific prompts
 │       │   ├── rag_chain.py       # RAGChain (full pipeline, invocable)
 │       │   ├── retrievers.py      # RetrieverFactory (ensemble BM25 + vector)
-│       │   └── vector_store.py    # Chroma lifecycle
+│       │   └── vector_store.py    # TurboVec lifecycle
 │       └── ui/
 │           ├── app.py             # ChatView — Streamlit page controller
 │           ├── components.py      # Stateless HTML rendering helpers
@@ -123,7 +123,7 @@ rag-chatbot/
 │   └── src/                       # React app (see frontend/src/)
 │
 ├── resources/                     # ← drop knowledge-base documents here
-└── chroma_db/                     # ← auto-generated vector store (gitignored)
+└── vectordb/                      # ← auto-generated vector store (gitignored)
 ```
 
 ---

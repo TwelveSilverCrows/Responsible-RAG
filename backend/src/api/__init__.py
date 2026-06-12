@@ -9,11 +9,15 @@ This factory builds the FastAPI app, registers routers, and sets up
 lifespan handlers for startup/shutdown.
 """
 
+import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
+# FastAPI is imported lazily inside create_app() so that the core modules
+# (db.models, core.config, etc.) can be imported without the web framework.
+from fastapi import FastAPI
 from src.api.routes import router as api_router
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -23,38 +27,26 @@ async def lifespan(app: FastAPI):
 
     Startup:
         - Connect to MongoDB (single connection pool, maxPoolSize=2).
-        - (Optional) pre-warm the RAG chain (increases memory at startup).
 
     Shutdown:
         - Close MongoDB connection.
-        - Release RAG chain resources.
-
-    Example
-    -------
-        from motor.motor_asyncio import AsyncIOMotorClient
-        from src.core.config import get_settings
-
-        async with lifespan(app):
-            settings = get_settings()
-            # app.state.db = AsyncIOMotorClient(
-            #     settings.mongo_uri, maxPoolSize=2
-            # )[settings.mongo_db]
-            yield
-            # app.state.db.client.close()
     """
     # ── Startup ───────────────────────────────────────────────────────────────
-    # TODO: Connect to MongoDB here (single connection for the app lifetime)
-    # settings = get_settings()
-    # app.state.mongo_client = AsyncIOMotorClient(settings.mongo_uri, maxPoolSize=2)
-    # app.state.db = app.state.mongo_client[settings.mongo_db]
+    from src.api.db.database import get_db
+    client = await get_db()
+    if client is not None:
+        logger.info("MongoDB connected successfully.")
+    else:
+        logger.warning("MongoDB not configured — database features disabled.")
+
     yield
+
     # ── Shutdown ──────────────────────────────────────────────────────────────
-    # TODO: Close connections
-    # if hasattr(app.state, "mongo_client"):
-    #     app.state.mongo_client.close()
+    from src.api.db.database import close_db
+    close_db()
 
 
-def create_app() -> FastAPI:
+def create_app():
     """
     Build and return a configured FastAPI application instance.
 
@@ -63,6 +55,9 @@ def create_app() -> FastAPI:
     FastAPI
         The fully configured application.
     """
+    from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+
     app = FastAPI(
         title="Responsible RAG API",
         description=(

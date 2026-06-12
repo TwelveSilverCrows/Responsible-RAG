@@ -50,7 +50,6 @@ from src.api.schemas.source import (
     SourceUpdateRequest,
     UploadResponse as SourceUploadResponse,
     SourceType,
-    SourceStatus,
 )
 
 # Feedback
@@ -103,7 +102,6 @@ __all__ = [
     "SourceUpdateRequest",
     "SourceUploadResponse",
     "SourceType",
-    "SourceStatus",
     # Feedback
     "FeedbackSubmitRequest",
     "FeedbackResponse",

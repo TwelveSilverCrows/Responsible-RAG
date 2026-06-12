@@ -1,16 +1,19 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check } from 'lucide-react';
+import { Check, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { SourceTypeSelector } from '@/components/admin/SourceTypeSelector';
 import { FileUploadZone } from '@/components/admin/FileUploadZone';
 import { UrlInputCard } from '@/components/admin/UrlInputCard';
 import { MetadataForm } from '@/components/admin/MetadataForm';
+import { api, BASE_URL, _readAuthToken } from '@/lib/api';
 import type { SourceType } from '@/types/source';
 import type { SourceMetadataFormData } from '@/lib/schemas/source.schema';
 import type { ExtractedMetadata } from '@/lib/utils/metadataExtractor';
+import type { UploadedFile as UploadedFileData } from '@/components/admin/FileUploadZone';
 import { cn } from '@/lib/utils';
 
 type WizardStep = 'type' | 'upload' | 'metadata';
@@ -30,13 +33,6 @@ const steps: StepConfig[] = [
 const fileTypes: SourceType[] = ['pdf', 'text', 'audio'];
 const urlTypes: SourceType[] = ['webpage', 'youtube'];
 
-interface UploadedFileData {
-  id: string;
-  file: File;
-  progress: number;
-  status: 'uploading' | 'complete' | 'error';
-}
-
 export function AddSourceWizard() {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState<WizardStep>('type');
@@ -44,6 +40,7 @@ export function AddSourceWizard() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFileData[]>([]);
   const [urlValue, setUrlValue] = useState('');
   const [fetchedMetadata, setFetchedMetadata] = useState<ExtractedMetadata | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const stepIndex = steps.findIndex((s) => s.key === currentStep);
 
@@ -62,17 +59,87 @@ export function AddSourceWizard() {
   const handleMetadataFetched = (url: string, metadata: ExtractedMetadata) => {
     setUrlValue(url);
     setFetchedMetadata(metadata);
-    // Don't auto-advance — let user review the preview first
   };
 
-  const handleUrlContinue = () => {
-    goToStep('metadata');
-  };
+  const handleUrlContinue = useCallback(async () => {
+    if (!urlValue) return;
+    setSubmitting(true);
+    try {
+      if (selectedType === 'youtube') {
+        // YouTube: submit for background transcription & ingestion
+        const payload = {
+          url: urlValue,
+          title: fetchedMetadata?.title || urlValue,
+          authors: fetchedMetadata?.authors || [],
+          publication_date: fetchedMetadata?.publicationDate || null,
+          publisher: fetchedMetadata?.publisher || 'YouTube',
+          description: fetchedMetadata?.description || null,
+          language: fetchedMetadata?.language || null,
+        };
+        await api.sources.uploadYouTube(payload);
+        toast.success('YouTube source submitted for processing');
+      } else {
+        // Webpage: submit for background scraping & ingestion
+        const payload = {
+          url: urlValue,
+          title: fetchedMetadata?.title || urlValue,
+          source_type: 'webpage',
+          authors: fetchedMetadata?.authors || [],
+          publication_date: fetchedMetadata?.publicationDate || null,
+          publisher: fetchedMetadata?.publisher || null,
+          description: fetchedMetadata?.description || null,
+          language: fetchedMetadata?.language || null,
+        };
+        await api.sources.uploadWebpage(payload);
+        toast.success('Webpage source submitted for processing');
+      }
+      navigate('/admin/sources');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to create source from URL';
+      toast.error(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  }, [urlValue, fetchedMetadata, selectedType, navigate]);
 
-  const handleMetadataSubmit = (data: SourceMetadataFormData) => {
-    // In a real app, this would call an API to create the source
-    void data;
-    navigate('/admin/sources');
+  const handleMetadataSubmit = async (data: SourceMetadataFormData) => {
+    setSubmitting(true);
+    try {
+      const metadataPayload = {
+        title: data.title,
+        source_type: selectedType!,
+        authors: data.authors,
+        publication_date: data.publicationDate ?? null,
+        publisher: data.publisher ?? null,
+        url: data.url,
+        doi: data.doi ?? null,
+        language: data.language ?? null,
+        description: data.description ?? null,
+        tags: data.tags,
+        content_sensitivity: data.contentSensitivity,
+        internal_notes: data.internalNotes ?? null,
+      };
+
+      if (uploadedFiles.length > 0) {
+        // Files are already uploaded (POST /upload). Now update metadata.
+        for (const f of uploadedFiles) {
+          if (f.sourceId) {
+            await api.sources.update(f.sourceId, metadataPayload);
+          }
+        }
+        toast.success(`${uploadedFiles.length} file(s) updated with metadata`);
+      } else {
+        // Metadata-only source
+        await api.sources.create(metadataPayload);
+        toast.success('Source created');
+      }
+      navigate('/admin/sources');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to save source';
+      toast.error(msg);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleBack = () => {
@@ -83,7 +150,6 @@ export function AddSourceWizard() {
     }
   };
 
-  // Build initial data for metadata form from fetched metadata
   const metadataInitialData: Partial<SourceMetadataFormData> | undefined = fetchedMetadata
     ? {
         title: fetchedMetadata.title ?? undefined,
@@ -161,8 +227,12 @@ export function AddSourceWizard() {
                 />
                 {fetchedMetadata && (
                   <div className="flex justify-end">
-                    <Button onClick={handleUrlContinue}>
-                      Continue to metadata →
+                    <Button onClick={handleUrlContinue} disabled={submitting}>
+                      {submitting ? (
+                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Creating source…</>
+                      ) : (
+                        'Continue to metadata →'
+                      )}
                     </Button>
                   </div>
                 )}
@@ -182,6 +252,7 @@ export function AddSourceWizard() {
               sourceType={selectedType}
               initialData={metadataInitialData}
               onSubmit={handleMetadataSubmit}
+              disabled={submitting}
             />
             <div className="flex justify-start">
               <Button variant="outline" onClick={handleBack}>

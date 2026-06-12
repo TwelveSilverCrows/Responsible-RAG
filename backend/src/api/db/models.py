@@ -41,10 +41,10 @@ def _new_id() -> str:
 
 
 def _clean_dict(d: dict, skip_none: bool = True) -> dict:
-    """Remove None values and convert ``_id`` field."""
+    """Remove None values and convert MongoDB ``_id`` to ``id``."""
     if skip_none:
         d = {k: v for k, v in d.items() if v is not None}
-    if "_id" in d and "id" not in d:
+    if "_id" in d:
         d["id"] = str(d.pop("_id"))
     return d
 
@@ -77,7 +77,9 @@ class User:
     def to_dict(self, skip_none: bool = True) -> dict:
         d = asdict(self)
         d["_id"] = d.pop("id")
-        return _clean_dict(d, skip_none)
+        if skip_none:
+            d = {k: v for k, v in d.items() if v is not None}
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> "User":
@@ -116,7 +118,9 @@ class UserProfile:
     def to_dict(self, skip_none: bool = True) -> dict:
         d = asdict(self)
         d["_id"] = d.pop("id")
-        return _clean_dict(d, skip_none)
+        if skip_none:
+            d = {k: v for k, v in d.items() if v is not None}
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> "UserProfile":
@@ -146,7 +150,9 @@ class ConsentRecord:
     def to_dict(self, skip_none: bool = True) -> dict:
         d = asdict(self)
         d["_id"] = d.pop("id")
-        return _clean_dict(d, skip_none)
+        if skip_none:
+            d = {k: v for k, v in d.items() if v is not None}
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> "ConsentRecord":
@@ -178,7 +184,9 @@ class Conversation:
     def to_dict(self, skip_none: bool = True) -> dict:
         d = asdict(self)
         d["_id"] = d.pop("id")
-        return _clean_dict(d, skip_none)
+        if skip_none:
+            d = {k: v for k, v in d.items() if v is not None}
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> "Conversation":
@@ -205,7 +213,9 @@ class Message:
     def to_dict(self, skip_none: bool = True) -> dict:
         d = asdict(self)
         d["_id"] = d.pop("id")
-        return _clean_dict(d, skip_none)
+        if skip_none:
+            d = {k: v for k, v in d.items() if v is not None}
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> "Message":
@@ -237,7 +247,7 @@ class Source:
     tags: list[str] = field(default_factory=list)
     content_sensitivity: str = "low"        # "low" | "medium" | "high"
     internal_notes: Optional[str] = None
-    status: str = "queued"                  # "queued" | "processing" | "indexed" | "error"
+    status: str = "queued"                  # "uploaded" | "queued" | "processing" | "indexed" | "error"
     error_message: Optional[str] = None
     file_path: Optional[str] = None
     thumbnail_url: Optional[str] = None
@@ -249,7 +259,9 @@ class Source:
     def to_dict(self, skip_none: bool = True) -> dict:
         d = asdict(self)
         d["_id"] = d.pop("id")
-        return _clean_dict(d, skip_none)
+        if skip_none:
+            d = {k: v for k, v in d.items() if v is not None}
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> "Source":
@@ -260,22 +272,25 @@ class Source:
 @dataclass
 class SourceChunk:
     """
-    A single chunk of a source document stored in Chroma + referenced from Mongo.
+    A single chunk of a source document stored in TurboVec + referenced from Mongo.
 
-    MongoDB collection: ``chunks`` (metadata only; vectors live in Chroma).
+    MongoDB collection: ``chunks`` (metadata only; vectors live in TurboVec).
+    This collection exists solely to map TurboVec vector IDs back to their source,
+    enabling full cleanup when a document is deleted.
     """
     id: str = field(default_factory=_new_id)
     source_id: str = ""
     chunk_index: int = 0
-    content: str = ""
-    chroma_id: Optional[str] = None          # ID in Chroma vector store
+    turbovec_id: Optional[str] = None          # ID in TurboVec vector store
     embedding_model: Optional[str] = None
     created_at: str = field(default_factory=_now_iso)
 
     def to_dict(self, skip_none: bool = True) -> dict:
         d = asdict(self)
         d["_id"] = d.pop("id")
-        return _clean_dict(d, skip_none)
+        if skip_none:
+            d = {k: v for k, v in d.items() if v is not None}
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> "SourceChunk":
@@ -305,7 +320,9 @@ class Feedback:
     def to_dict(self, skip_none: bool = True) -> dict:
         d = asdict(self)
         d["_id"] = d.pop("id")
-        return _clean_dict(d, skip_none)
+        if skip_none:
+            d = {k: v for k, v in d.items() if v is not None}
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> "Feedback":

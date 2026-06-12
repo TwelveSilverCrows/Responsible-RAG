@@ -32,7 +32,7 @@ async def readiness(settings: Settings = Depends(get_settings)):
 
     - Settings loaded
     - RAG chain initialised (lazy)
-    - Chroma DB reachable (optional)
+    - Vector store reachable (optional)
     """
     # TODO: Add real readiness checks
     # from src.api.deps import get_rag_chain
@@ -40,5 +40,5 @@ async def readiness(settings: Settings = Depends(get_settings)):
     return {
         "status": "ok",
         "rag_chain_loaded": False,
-        "chroma_connected": False,
+        "vectordb_connected": False,
     }

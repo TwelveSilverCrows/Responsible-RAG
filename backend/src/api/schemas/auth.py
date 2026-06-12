@@ -32,11 +32,11 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    """Authenticate with email + password."""
+    """Authenticate with email/username + password."""
 
-    email: EmailStr = Field(
-        ..., description="Registered email.",
-        example="user@example.ca",
+    email: str = Field(
+        ..., description="Registered email or username.",
+        example="admin",
     )
     password: str = Field(
         ..., min_length=1,

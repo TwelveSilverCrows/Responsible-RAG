@@ -156,15 +156,28 @@ async def chat(
     # Invoke the RAG pipeline
     result = chain.invoke(body.question, group_prompt)
 
-    # Build citation list from source titles
+    # Build rich citation list from source metadata returned by the RAG chain.
+    # All fields were stored in TurboVec during ingestion, so no additional
+    # database lookup is needed.
     citations = [
         CitationSchema(
             id=f"cit-{i}",
-            source_id=title,
-            excerpt="",               # full excerpt requires chunk access
+            source_id=src.get("source_id", ""),
+            source_title=src.get("source_title", "Unknown source"),
+            source_type=src.get("source_type", "pdf"),
+            authors=src.get("authors", []),
+            publication_date=src.get("publication_date"),
+            publisher=src.get("publisher"),
+            url=src.get("url", ""),
+            doi=src.get("doi", ""),
+            language=src.get("language"),
+            description=src.get("description"),
+            tags=src.get("tags", []),
+            content_sensitivity=src.get("content_sensitivity", "low"),
+            excerpt=src.get("excerpt", ""),
             number=i + 1,
         )
-        for i, title in enumerate(result.sources)
+        for i, src in enumerate(result.sources)
     ]
 
     return ChatResponse(
