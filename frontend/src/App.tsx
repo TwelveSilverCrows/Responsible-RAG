@@ -10,6 +10,7 @@ const Home = lazy(() => import('@/app/page'));
 const LoginPage = lazy(() => import('@/app/login/page'));
 const RegisterPage = lazy(() => import('@/app/register/page'));
 const VerifyEmailPage = lazy(() => import('@/app/auth/verify-email/page'));
+const AuthCallbackPage = lazy(() => import('@/app/auth/callback/page'));
 const ResetPasswordPage = lazy(() => import('@/app/auth/reset-password/page'));
 const ChatPage = lazy(() => import('@/app/chat/page'));
 const ConversationPage = lazy(() => import('@/app/chat/[conversationId]/page'));
@@ -46,6 +47,7 @@ export default function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
               <Route path="/auth/verify-email" element={<VerifyEmailPage />} />
+              <Route path="/auth/callback" element={<AuthCallbackPage />} />
               <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
               <Route path="/chat" element={<ChatPage />} />
                 <Route path="/chat/:conversationId" element={<ConversationPage />} />

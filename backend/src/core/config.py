@@ -35,17 +35,30 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-large-en-v1.5"
     huggingfacehub_api_token: str = ""     # hf_… token with inference permission
 
-    # ── Dev Auth ───────────────────────────────────────────────────────────
+    # ── Auth ───────────────────────────────────────────────────────────────
     auth_secret_key: str = "dev-secret-change-in-production-0123456789"
     auth_algorithm: str = "HS256"
     auth_token_expire_minutes: int = 1440        # 24 hours
-    dummy_admin_email: str = "admin"
-    dummy_admin_password: str = "admin123"
+
+    # ── Admin credentials (login via .env, not in DB) ──────────────────────
+    # Reads from DUMMY_ADMIN_EMAIL / DUMMY_ADMIN_PASSWORD in .env
+    admin_email: str = "admin@responsablefrontier.com"
+    admin_password: str = "admin123"
+
+    # ── Frontend URL (for OAuth redirects & email verification links) ─────
+    frontend_url: str = "http://localhost:5173"
 
     # ── Google OAuth ──────────────────────────────────────────────────────
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:8000/api/v1/auth/google/callback"
+
+    # ── SMTP (email verification) ──────────────────────────────────────────
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
 
     # ── Chunking ──────────────────────────────────────────────────────────────
     use_semantic_chunking: bool = True

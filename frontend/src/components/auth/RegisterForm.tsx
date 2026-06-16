@@ -4,11 +4,13 @@ import { useState, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Loader2, Eye, EyeOff } from 'lucide-react';
+import { Loader2, Eye, EyeOff, ExternalLink } from 'lucide-react';
 
 import { useAuthStore } from '@/hooks/useAuth';
 import { registerSchema, type RegisterFormData } from '@/lib/schemas/profile.schema';
 import { useConsentStore } from '@/stores/consentStore';
+import { api } from '@/lib/api';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -47,6 +49,7 @@ export function RegisterForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [devVerifyUrl, setDevVerifyUrl] = useState<string | null>(null);
 
   const form = useForm<RegisterFormData>({
     resolver: zodResolver(registerSchema),
@@ -64,37 +67,32 @@ export function RegisterForm() {
 
   async function onSubmit(data: RegisterFormData) {
     setIsSubmitting(true);
-    // Simulate network delay
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    loginAsNewUser(
-      {
-        id: 'mock-user-new',
+    try {
+      const res = await api.auth.register({
         email: data.email,
-        displayName: data.displayName,
-        role: 'client',
-        emailVerified: false,
-      },
-      'mock-token',
-    );
-    resetConsent(); // Fresh consent state for new user
+        password: data.password,
+        name: data.displayName,
+      });
 
-    navigate('/onboarding/welcome');
+      toast.success('Account created!');
+      
+      // In dev mode, response includes a direct verification link
+      const url = (res as any).dev_verify_url;
+      if (url) {
+        setDevVerifyUrl(url);
+      } else {
+        navigate('/login');
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Registration failed';
+      form.setError('root', { message: msg });
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   function handleGoogleSignup() {
-    loginAsNewUser(
-      {
-        id: 'mock-google-user-new',
-        email: 'user@gmail.com',
-        displayName: 'Google User',
-        role: 'client',
-        emailVerified: true,
-      },
-      'mock-token',
-    );
-    resetConsent();
-    navigate('/onboarding/welcome');
+    // Google signup is handled by GoogleOAuthButton
   }
 
   return (
@@ -249,6 +247,12 @@ export function RegisterForm() {
             )}
           />
 
+          {form.formState.errors.root && (
+            <div className="text-sm text-destructive bg-destructive/10 rounded-lg p-3">
+              {form.formState.errors.root.message}
+            </div>
+          )}
+
           <Button
             type="submit"
             className="w-full"
@@ -267,15 +271,43 @@ export function RegisterForm() {
         </form>
       </Form>
 
-      <p className="text-sm text-center text-muted-foreground">
-        Already have an account?{' '}
-        <Link
-          to="/login"
-          className="text-primary font-medium hover:text-primary/80 underline-offset-2 hover:underline"
-        >
-          Sign in
-        </Link>
-      </p>
+      {devVerifyUrl && (
+        <div className="space-y-3 text-center">
+          <div className="bg-muted/50 rounded-lg p-4 text-sm space-y-2">
+            <p className="text-muted-foreground">
+              No email sent (SMTP not configured).
+            </p>
+            <a
+              href={devVerifyUrl}
+              className="inline-flex items-center gap-1.5 text-primary font-medium hover:underline"
+            >
+              <ExternalLink className="size-4" />
+              Click here to verify your email
+            </a>
+            <p className="text-xs text-muted-foreground">
+              (This link appears only in dev mode)
+            </p>
+          </div>
+          <Link
+            to="/login"
+            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Back to sign in
+          </Link>
+        </div>
+      )}
+
+      {!devVerifyUrl && (
+        <p className="text-sm text-center text-muted-foreground">
+          Already have an account?{' '}
+          <Link
+            to="/login"
+            className="text-primary font-medium hover:text-primary/80 underline-offset-2 hover:underline"
+          >
+            Sign in
+          </Link>
+        </p>
+      )}
     </div>
   );
 }

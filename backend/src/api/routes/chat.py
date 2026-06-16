@@ -1,164 +1,246 @@
-"""
-routes/chat.py — Chat endpoints
-=================================
-Core RAG conversation endpoints. Supports both single-turn and streaming
-responses.
-
-Endpoints:
-    GET    /api/v1/chat/conversations       — List user's conversations
-    POST   /api/v1/chat/conversations       — Create new conversation
-    GET    /api/v1/chat/conversations/{id}  — Get conversation with messages
-    PUT    /api/v1/chat/conversations/{id}  — Rename conversation
-    DELETE /api/v1/chat/conversations/{id}  — Delete conversation
-    GET    /api/v1/chat/conversations/{id}/messages  — Get messages
-    POST   /api/v1/chat                     — Single-turn RAG answer
-    POST   /api/v1/chat/stream              — Streaming RAG answer (SSE)
-
-Low-memory notes:
-    - Use streaming for long responses — avoids buffering the full answer.
-    - RAG chain is loaded lazily and cached (singleton) across requests.
-    - Conversations are paginated — never load all history.
-"""
+"""Chat routes — conversations, messages, and RAG with MongoDB persistence."""
 
 from uuid import uuid4
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from bson.objectid import ObjectId
+
 from src.api.schemas.chat import (
-    ChatRequest,
-    ChatResponse,
-    ChatStreamRequest,
-    CitationSchema,
-    ConversationResponse,
-    ConversationListItem,
-    ConversationListResponse,
-    MessageResponse,
-    CreateConversationRequest,
-    RenameConversationRequest,
+    ChatRequest, ChatResponse, CitationSchema,
+    ConversationListItem, ConversationListResponse, ConversationResponse,
+    MessageResponse, CreateConversationRequest, RenameConversationRequest,
 )
-from src.api.middleware import require_current_user
+from src.api.middleware import get_current_user
 from src.api.deps import get_rag_chain
-from src.api.db.models import User
-from src.core.config import Settings
+from src.api.db.database import get_users_collection
 from src.core.profiles import RAGPopulation
 from src.core.rag_chain import RAGChain
 
 router = APIRouter()
 
 
+def _get_db():
+    from src.api.db.database import get_database
+    return get_database()
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _conv_to_response(doc: dict) -> dict:
+    return {
+        "id": str(doc["_id"]),
+        "title": doc.get("title", "New conversation"),
+        "profile_key": doc.get("profile_key"),
+        "messages": [],
+        "message_count": doc.get("message_count", 0),
+        "created_at": doc.get("created_at", ""),
+        "updated_at": doc.get("updated_at", ""),
+    }
+
+
+def _conv_list_item(doc: dict) -> dict:
+    return {
+        "id": str(doc["_id"]),
+        "title": doc.get("title", "New conversation"),
+        "last_message": doc.get("last_message"),
+        "last_message_at": doc.get("last_message_at"),
+        "created_at": doc.get("created_at", ""),
+        "message_count": doc.get("message_count", 0),
+    }
+
+
+def _msg_to_response(doc: dict) -> dict:
+    return {
+        "id": str(doc["_id"]),
+        "conversation_id": doc.get("conversation_id", ""),
+        "role": doc.get("role", "user"),
+        "content": doc.get("content", ""),
+        "citations": doc.get("citations", []),
+        "is_streaming": doc.get("is_streaming", False),
+        "created_at": doc.get("created_at", ""),
+    }
+
+
 # ── Conversations ─────────────────────────────────────────────────────────────
 
-@router.get("/conversations", response_model=ConversationListResponse)
+@router.get("/conversations")
 async def list_conversations(
     page: int = 1,
     limit: int = 20,
-    user: User = Depends(require_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
-    """
-    List the current user's conversations, most recent first.
+    db = _get_db()
+    if db is None:
+        raise HTTPException(503, "Database not available")
 
-    Paginated with ``page`` and ``limit`` query parameters.
-    """
-    # TODO: Implement
-    # service = ChatService(user.id)
-    # convos, total = await service.list_conversations(page=page, limit=limit)
-    # items = [ConversationListItem.model_validate(c) for c in convos]
-    # return ConversationListResponse(conversations=items, total=total, page=page, limit=limit)
-    return ConversationListResponse(
-        conversations=[], total=0, page=page, limit=limit,
-    )
+    user_id = current_user["sub"]
+    cursor = db["conversations"].find({"user_id": user_id}) \
+        .sort("updated_at", -1) \
+        .skip((page - 1) * limit) \
+        .limit(limit)
+    items = [_conv_list_item(c) for c in cursor]
+    total = db["conversations"].count_documents({"user_id": user_id})
+    return {"conversations": items, "total": total, "page": page, "limit": limit}
 
 
-@router.post("/conversations", response_model=ConversationResponse, status_code=201)
+@router.post("/conversations", status_code=201)
 async def create_conversation(
     body: CreateConversationRequest,
-    user: User = Depends(require_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
-    """
-    Start a new conversation.
+    db = _get_db()
+    if db is None:
+        raise HTTPException(503, "Database not available")
 
-    Optionally provide a title and audience profile key.
-    """
-    # TODO: Implement
-    raise NotImplementedError("TODO: implement create_conversation")
+    now = _now()
+    doc = {
+        "user_id": current_user["sub"],
+        "title": body.title or "New conversation",
+        "profile_key": body.profile_key,
+        "message_count": 0,
+        "last_message": None,
+        "last_message_at": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    result = db["conversations"].insert_one(doc)
+    doc["_id"] = result.inserted_id
+    return _conv_to_response(doc)
 
 
-@router.get("/conversations/{conversation_id}", response_model=ConversationResponse)
+@router.get("/conversations/{conversation_id}")
 async def get_conversation(
     conversation_id: str,
-    user: User = Depends(require_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
-    """
-    Get a full conversation including all messages.
-    """
-    # TODO: Implement
-    raise NotImplementedError("TODO: implement get_conversation")
+    db = _get_db()
+    if db is None:
+        raise HTTPException(503, "Database not available")
+
+    conv = db["conversations"].find_one({"_id": ObjectId(conversation_id), "user_id": current_user["sub"]})
+    if not conv:
+        raise HTTPException(404, "Conversation not found")
+
+    messages = list(db["messages"].find({"conversation_id": conversation_id}).sort("created_at", 1))
+    resp = _conv_to_response(conv)
+    resp["messages"] = [_msg_to_response(m) for m in messages]
+    return resp
 
 
-@router.put("/conversations/{conversation_id}", response_model=ConversationResponse)
+@router.put("/conversations/{conversation_id}")
 async def rename_conversation(
     conversation_id: str,
     body: RenameConversationRequest,
-    user: User = Depends(require_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
-    """
-    Rename a conversation.
-    """
-    # TODO: Implement
-    raise NotImplementedError("TODO: implement rename_conversation")
+    db = _get_db()
+    if db is None:
+        raise HTTPException(503, "Database not available")
+
+    result = db["conversations"].update_one(
+        {"_id": ObjectId(conversation_id), "user_id": current_user["sub"]},
+        {"$set": {"title": body.title, "updated_at": _now()}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(404, "Conversation not found")
+
+    conv = db["conversations"].find_one({"_id": ObjectId(conversation_id)})
+    return _conv_to_response(conv)
 
 
 @router.delete("/conversations/{conversation_id}")
 async def delete_conversation(
     conversation_id: str,
-    user: User = Depends(require_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
-    """
-    Delete a conversation and all its messages.
-    """
-    # TODO: Implement
-    raise NotImplementedError("TODO: implement delete_conversation")
+    db = _get_db()
+    if db is None:
+        raise HTTPException(503, "Database not available")
+
+    result = db["conversations"].delete_one(
+        {"_id": ObjectId(conversation_id), "user_id": current_user["sub"]}
+    )
+    if result.deleted_count == 0:
+        raise HTTPException(404, "Conversation not found")
+    db["messages"].delete_many({"conversation_id": conversation_id})
+    return {"status": "ok"}
 
 
-@router.get(
-    "/conversations/{conversation_id}/messages",
-    response_model=list[MessageResponse],
-)
+@router.get("/conversations/{conversation_id}/messages")
 async def get_messages(
     conversation_id: str,
     page: int = 1,
     limit: int = 50,
-    user: User = Depends(require_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
-    """
-    Get paginated messages for a conversation, oldest first.
-    """
-    # TODO: Implement
-    raise NotImplementedError("TODO: implement get_messages")
+    db = _get_db()
+    if db is None:
+        raise HTTPException(503, "Database not available")
+
+    conv = db["conversations"].find_one({"_id": ObjectId(conversation_id), "user_id": current_user["sub"]})
+    if not conv:
+        raise HTTPException(404, "Conversation not found")
+
+    cursor = db["messages"].find({"conversation_id": conversation_id}) \
+        .sort("created_at", 1) \
+        .skip((page - 1) * limit) \
+        .limit(limit)
+    return [_msg_to_response(m) for m in cursor]
 
 
 # ── RAG (single-turn) ────────────────────────────────────────────────────────
 
-@router.post("", response_model=ChatResponse)
+@router.post("")
 async def chat(
     body: ChatRequest,
     chain: RAGChain = Depends(get_rag_chain),
+    current_user: dict = Depends(get_current_user),
 ):
-    """
-    Single-turn Q&A with the RAG pipeline.
+    db = _get_db()
 
-    Accepts a question and optional audience profile.
-    Returns the generated answer with source citations.
-    Uses the general profile by default (no login required).
-    """
-    # Resolve profile key → RAGPopulation prompt text (defaults to GENERAL)
+    # Resolve profile
     group_prompt = _resolve_profile(body.profile_key)
 
-    # Invoke the RAG pipeline
+    # Get or create conversation
+    conv_id = body.conversation_id
+    user_id = current_user["sub"]
+    now = _now()
+
+    if not conv_id:
+        conv_doc = {
+            "user_id": user_id,
+            "title": body.question[:80] + ("..." if len(body.question) > 80 else ""),
+            "profile_key": body.profile_key,
+            "message_count": 0,
+            "last_message": None,
+            "last_message_at": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+        if db is not None:
+            result = db["conversations"].insert_one(conv_doc)
+            conv_id = str(result.inserted_id)
+        else:
+            conv_id = f"conv-{uuid4().hex[:12]}"
+
+    # Store user message
+    msg_id = f"msg-{uuid4().hex[:12]}"
+    if db is not None:
+        db["messages"].insert_one({
+            "conversation_id": conv_id,
+            "role": "user",
+            "content": body.question,
+            "citations": [],
+            "is_streaming": False,
+            "created_at": now,
+        })
+
+    # Invoke RAG
     result = chain.invoke(body.question, group_prompt)
 
-    # Build rich citation list from source metadata returned by the RAG chain.
-    # All fields were stored in TurboVec during ingestion, so no additional
-    # database lookup is needed.
     citations = [
         CitationSchema(
             id=f"cit-{i}",
@@ -180,39 +262,58 @@ async def chat(
         for i, src in enumerate(result.sources)
     ]
 
+    # Store assistant message
+    if db is not None:
+        db["messages"].insert_one({
+            "conversation_id": conv_id,
+            "role": "assistant",
+            "content": result.answer,
+            "citations": [c.model_dump() for c in citations],
+            "is_streaming": False,
+            "created_at": _now(),
+        })
+        db["conversations"].update_one(
+            {"_id": ObjectId(conv_id) if ObjectId.is_valid(conv_id) else conv_id},
+            {"$set": {
+                "last_message": result.answer[:100],
+                "last_message_at": _now(),
+                "updated_at": _now(),
+            }, "$inc": {"message_count": 2}},
+        )
+
     return ChatResponse(
         answer=result.answer,
         sources=citations,
-        conversation_id=body.conversation_id or "dev-conv-id",
-        message_id=f"msg-{uuid4().hex[:12]}",
+        conversation_id=conv_id,
+        message_id=msg_id,
         profile_key=body.profile_key,
     )
 
 
-@router.post("/stream")
-async def chat_stream(
-    body: ChatStreamRequest,
-    chain: RAGChain = Depends(get_rag_chain),
-    user: User = Depends(require_current_user),
-):
-    """
-    Streaming Q&A — returns a Server-Sent Events (SSE) stream.
+# ── Profile resolver ──────────────────────────────────────────────────────────
 
-    Each chunk is a JSON line.  The final chunk contains ``"done": true``
-    and the full source list.
+_PROFILE_KEY_MAP: dict[str, str] = {
+    "general": "GENERAL",
+    "senior": "SENIOR_LOW_EDU_CANADA",
+    "lgbt_teen": "LGBT_CANADIAN_TEEN",
+    "lgbt": "LGBT_CANADIAN_TEEN",
+    "indigenous": "INDIGENOUS_COMMUNITY_LEADER_CA",
+    "disabled": "MIDAGED_DISABLED_CANADIAN",
+    "full": "SENIOR_LOW_EDU_CANADA",
+}
 
-    Example (JavaScript):
-        const stream = await fetch("/api/v1/chat/stream", { ... });
-        const reader = stream.body.getReader();
-    """
-    # TODO: Implement using StreamingResponse
-    # from fastapi.responses import StreamingResponse
-    # async def event_stream():
-    #     service = ChatService(user.id)
-    #     async for chunk in service.ask_rag_stream(body.question, body.conversation_id, body.profile_key):
-    #         yield json.dumps(chunk) + "\\n"
-    # return StreamingResponse(event_stream(), media_type="text/event-stream")
-    return {"detail": "Streaming not yet implemented"}
+
+def _resolve_profile(profile_key: str | None) -> str:
+    if not profile_key:
+        return RAGPopulation.GENERAL.value
+    key = profile_key.strip().lower()
+    member_name = _PROFILE_KEY_MAP.get(key)
+    if not member_name:
+        return RAGPopulation.GENERAL.value
+    try:
+        return RAGPopulation[member_name].value
+    except KeyError:
+        return RAGPopulation.GENERAL.value
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

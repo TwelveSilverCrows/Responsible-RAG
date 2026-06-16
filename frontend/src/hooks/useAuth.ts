@@ -3,7 +3,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-type UserRole = 'client' | 'admin';
+type UserRole = 'user' | 'admin';
 
 export interface AuthUser {
   id: string;
@@ -101,7 +101,7 @@ export function useAuth() {
   return {
     ...store,
     isAdmin: store.user?.role === 'admin',
-    isClient: store.user?.role === 'client',
+    isClient: store.user?.role === 'user',
     isEmailVerified: store.user?.emailVerified ?? false,
     needsOnboarding: store.isAuthenticated && !store.onboardingCompleted,
   };

@@ -10,10 +10,10 @@ Usage:
 from fastapi import APIRouter
 from src.api.routes.admin.dashboard import router as dashboard_router
 from src.api.routes.admin.sources import router as sources_router
+from src.api.routes.admin.users import router as users_router
 
 admin_router = APIRouter()
 
 admin_router.include_router(dashboard_router, prefix="/dashboard", tags=["Admin"])
 admin_router.include_router(sources_router, prefix="/sources", tags=["Admin"])
-
-# Future: admin_router.include_router(users_router, prefix="/users", tags=["Admin"])
+admin_router.include_router(users_router, prefix="/users", tags=["Admin"])

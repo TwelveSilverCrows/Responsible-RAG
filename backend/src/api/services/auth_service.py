@@ -1,208 +1,177 @@
-"""
-services/auth_service.py — Authentication business logic
-==========================================================
-Dev-mode authentication using a single dummy admin user configured
-via environment variables, plus Google OAuth ID token verification.
-"""
+"""Simple auth service — direct MongoDB ops, no classes. Matches fastapi_auth."""
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
+import logging
 
-import jwt
-import requests
+import jwt as pyjwt
+import bcrypt as _bcrypt
+import httpx
+from urllib.parse import urlencode
 
-from src.api.db.models import User
+from src.api.db.database import get_users_collection
 from src.core.config import get_settings
 
+logger = logging.getLogger(__name__)
 
-@dataclass
-class AuthResult:
-    """Result of a login or registration attempt."""
+# ── Password ──────────────────────────────────────────────────────────────────
 
-    user: User
-    access_token: str
-    refresh_token: str
-    is_new_user: bool = False
+def hash_password(password: str) -> str:
+    return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode()
 
+def verify_password(plain: str, hashed: str) -> bool:
+    return _bcrypt.checkpw(plain.encode(), hashed.encode())
 
-def _now_ts() -> int:
-    """Current UTC epoch seconds."""
+# ── JWT ───────────────────────────────────────────────────────────────────────
+
+def _now() -> int:
     return int(datetime.now(timezone.utc).timestamp())
 
-
-def create_access_token(user: User, auth_method: str = "password") -> str:
-    """Issue a short-lived JWT access token."""
+def create_token(data: dict, expires_delta: int | None = None) -> str:
     settings = get_settings()
-    payload = {
-        "sub": user.id,
-        "email": user.email,
-        "role": user.role,
-        "auth_method": auth_method,
-        "iat": _now_ts(),
-        "exp": _now_ts() + settings.auth_token_expire_minutes * 60,
-    }
-    return jwt.encode(payload, settings.auth_secret_key, algorithm=settings.auth_algorithm)
-
-
-def create_refresh_token(user: User) -> str:
-    """Issue a longer-lived JWT refresh token (7 days)."""
-    settings = get_settings()
-    payload = {
-        "sub": user.id,
-        "email": user.email,
-        "role": user.role,
-        "iat": _now_ts(),
-        "exp": _now_ts() + 7 * 24 * 3600,
-        "type": "refresh",
-    }
-    return jwt.encode(payload, settings.auth_secret_key, algorithm=settings.auth_algorithm)
-
+    to_encode = data.copy()
+    expire = _now() + (expires_delta if expires_delta is not None else settings.auth_token_expire_minutes * 60)
+    to_encode["exp"] = expire
+    return pyjwt.encode(to_encode, settings.auth_secret_key, algorithm=settings.auth_algorithm)
 
 def decode_token(token: str) -> dict | None:
-    """Decode and verify a JWT.  Returns the payload dict, or None if invalid."""
     settings = get_settings()
     try:
-        return jwt.decode(token, settings.auth_secret_key, algorithms=[settings.auth_algorithm])
-    except jwt.PyJWTError:
+        return pyjwt.decode(token, settings.auth_secret_key, algorithms=[settings.auth_algorithm])
+    except pyjwt.PyJWTError:
         return None
 
+# ── Google OAuth ──────────────────────────────────────────────────────────────
 
-def verify_google_id_token(id_token: str) -> Optional[dict]:
+_GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+_GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+_GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
+
+def get_google_auth_url() -> str:
+    settings = get_settings()
+    params = {
+        "client_id": settings.google_client_id,
+        "redirect_uri": settings.google_redirect_uri,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "access_type": "offline",
+        "prompt": "consent",
+    }
+    return f"{_GOOGLE_AUTH_URL}?{urlencode(params)}"
+
+async def exchange_google_code(code: str) -> dict:
+    settings = get_settings()
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            _GOOGLE_TOKEN_URL,
+            data={
+                "code": code,
+                "client_id": settings.google_client_id,
+                "client_secret": settings.google_client_secret,
+                "redirect_uri": settings.google_redirect_uri,
+                "grant_type": "authorization_code",
+            },
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+async def get_google_user(access_token: str) -> dict:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            _GOOGLE_USERINFO_URL,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+# ── Email verification ────────────────────────────────────────────────────────
+
+def create_verification_token(email: str) -> str:
+    return create_token({"sub": email, "purpose": "verify"}, expires_delta=60 * 24)
+
+def send_verification_email(to_email: str, token: str) -> None:
+    settings = get_settings()
+    verify_url = f"http://localhost:8000/api/v1/auth/verify-email?token={token}"
+
+    if not settings.smtp_user or not settings.smtp_password:
+        logger.info("SMTP not configured — verification URL for %s: %s", to_email, verify_url)
+        return
+
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = "Verify your email — Responsible RAG"
+    msg["From"] = settings.smtp_from or "noreply@responsiblerag.com"
+    msg["To"] = to_email
+
+    html = f"""
+    <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:32px">
+      <h2 style="margin:0 0 16px">Verify your email</h2>
+      <p style="color:#444;margin:0 0 24px">
+        Click below to activate your account. Link expires in 24 hours.
+      </p>
+      <a href="{verify_url}"
+         style="display:inline-block;padding:12px 28px;background:#000;color:#fff;
+                text-decoration:none;border-radius:6px;font-weight:600">
+        Verify Email
+      </a>
+      <p style="color:#999;font-size:13px;margin-top:32px">
+        If you didn't register, ignore this email.
+      </p>
+    </div>
     """
-    Verify a Google ID token and return the user info payload.
+    msg.attach(MIMEText(html, "html"))
 
-    Uses ``google.oauth2.id_token.verify_oauth2_token`` which fetches
-    Google's public certs and validates the token signature, audience,
-    and expiration automatically.
-
-    Also supports Google access tokens by calling Google's tokeninfo
-    endpoint as a fallback.
-
-    Returns ``None`` if verification fails.
-    """
-    # First try: verify as an ID token (JWT signed by Google)
     try:
-        from google.oauth2 import id_token as google_id_token
-        from google.auth.transport import requests as google_requests
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(settings.smtp_user, settings.smtp_password)
+            server.sendmail(msg["From"], to_email, msg.as_string())
+        logger.info("Verification email sent to %s", to_email)
+    except Exception as exc:
+        logger.error("Failed to send verification email to %s: %s", to_email, exc)
 
-        settings = get_settings()
-        if not settings.google_client_id:
-            return None
+# ── Serialize ─────────────────────────────────────────────────────────────────
 
-        info = google_id_token.verify_oauth2_token(
-            id_token,
-            google_requests.Request(),
-            settings.google_client_id,
-        )
-        return info
-    except Exception:
-        pass
+# ── Password reset email ──────────────────────────────────────────────────────
 
-    # Second try: verify as an access token via Google's tokeninfo endpoint
+def send_reset_email(to_email: str, token: str) -> None:
+    settings = get_settings()
+    reset_url = f"{settings.frontend_url}/auth/reset-password?token={token}"
+
+    if not settings.smtp_user or not settings.smtp_password:
+        logger.info("SMTP not configured — reset URL for %s: %s", to_email, reset_url)
+        return
+
+    import smtplib
+    from email.mime.text import MIMEText
+
+    msg = MIMEText(
+        f"Click this link to reset your password: {reset_url}\n\nLink expires in 1 hour.",
+        "plain",
+    )
+    msg["Subject"] = "Reset your password — Responsible RAG"
+    msg["From"] = settings.smtp_from or "noreply@responsiblerag.com"
+    msg["To"] = to_email
+
     try:
-        import requests
-        resp = requests.get(
-            "https://www.googleapis.com/oauth2/v3/tokeninfo",
-            params={"access_token": id_token},
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            # Map tokeninfo response to standard fields
-            return {
-                "sub": data.get("sub", ""),
-                "email": data.get("email", ""),
-                "name": data.get("name", ""),
-                "email_verified": data.get("email_verified") == "true",
-                "picture": data.get("picture", ""),
-            }
-    except Exception:
-        pass
-
-    return None
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(settings.smtp_user, settings.smtp_password)
+            server.sendmail(msg["From"], to_email, msg.as_string())
+        logger.info("Reset email sent to %s", to_email)
+    except Exception as exc:
+        logger.error("Failed to send reset email to %s: %s", to_email, exc)
 
 
-class AuthService:
-    """
-    Authentication service supporting both password-based and Google OAuth login.
-    """
+# ── Serialize ─────────────────────────────────────────────────────────────────
 
-    @staticmethod
-    async def login(email: str, password: str) -> AuthResult:
-        """
-        Authenticate with email + password against the dummy admin user.
-
-        Raises ``ValueError`` if credentials don't match.
-        """
-        settings = get_settings()
-
-        if email != settings.dummy_admin_email or password != settings.dummy_admin_password:
-            raise ValueError("Invalid email or password")
-
-        user = User(
-            id="admin-dev",
-            email=email,
-            display_name="Admin",
-            role="admin",
-            email_verified=True,
-        )
-
-        return AuthResult(
-            user=user,
-            access_token=create_access_token(user),
-            refresh_token=create_refresh_token(user),
-            is_new_user=False,
-        )
-
-    @staticmethod
-    async def google_auth(id_token: str) -> AuthResult:
-        """
-        Authenticate via Google ID token.
-
-        Verifies the token with Google, then creates or returns an existing
-        user.  In dev mode, this creates a lightweight in-memory user.
-
-        Raises ``ValueError`` if the token is invalid.
-        """
-        info = verify_google_id_token(id_token)
-        if info is None:
-            raise ValueError("Invalid Google ID token")
-
-        google_id = info.get("sub", "")
-        email = info.get("email", "")
-        name = info.get("name", email.split("@")[0] if email else "Google User")
-
-        # In dev mode, create/find user from Google info
-        # (In production, look up or create in MongoDB)
-        user = User(
-            id=f"google-{google_id}",
-            email=email,
-            display_name=name,
-            role="client",
-            email_verified=info.get("email_verified", False),
-            google_id=google_id,
-        )
-
-        # TODO: store/retrieve user in MongoDB when available
-
-        return AuthResult(
-            user=user,
-            access_token=create_access_token(user, auth_method="google"),
-            refresh_token=create_refresh_token(user),
-            is_new_user=True,
-        )
-
-    @staticmethod
-    async def register(
-        email: str,
-        password: str,
-        display_name: str,
-    ) -> AuthResult:
-        """Register is not available in dev mode."""
-        raise NotImplementedError("Registration is not available in dev mode")
-
-    @staticmethod
-    async def verify_email(token: str) -> bool:
-        """Email verification is not available in dev mode."""
-        raise NotImplementedError("Email verification is not available in dev mode")
+def serialize_user(doc: dict) -> dict:
+    doc = dict(doc)
+    doc["id"] = str(doc.pop("_id"))
+    doc.pop("hashed_password", None)
+    return doc

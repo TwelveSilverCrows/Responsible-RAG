@@ -85,6 +85,26 @@ def get_database():
     return client[settings.mongo_db]
 
 
+def get_users_collection():
+    """Get the users collection from the database."""
+    db = get_database()
+    if db is None:
+        return None
+    return db["users"]
+
+
+def init_indexes():
+    """Create indexes for MongoDB collections."""
+    from pymongo import ASCENDING
+    users = get_users_collection()
+    if users is not None:
+        users.create_index([("email", ASCENDING)], unique=True)
+        db = users.database
+        db["profiles"].create_index([("user_id", ASCENDING)], unique=True)
+        db["consent"].create_index([("user_id", ASCENDING)], unique=True)
+        logger.info("MongoDB indexes initialized.")
+
+
 def close_db():
     """Close the MongoDB connection pool."""
     global _client

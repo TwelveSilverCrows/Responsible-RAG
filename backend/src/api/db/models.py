@@ -62,9 +62,10 @@ class User:
     """
     id: str = field(default_factory=_new_id)
     email: str = ""
-    password_hash: str = ""          # bcrypt hash
     display_name: str = ""
+    provider: str = "email"          # "email" | "google"
     role: str = "client"             # "client" | "admin"
+    hashed_password: Optional[str] = None  # bcrypt hash (None for OAuth users)
     email_verified: bool = False
     verification_token: Optional[str] = None
     reset_token: Optional[str] = None

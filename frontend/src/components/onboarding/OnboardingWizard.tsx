@@ -93,13 +93,47 @@ export function OnboardingWizard() {
     setCurrentStep(STEP_ORDER[stepIndex - 1]);
   };
 
-  const handleComplete = () => {
+  const handleComplete = async () => {
     try {
       sessionStorage.removeItem(STORAGE_KEY);
     } catch {
       // sessionStorage not available
     }
-    // Mark onboarding as completed so root redirect works properly
+    try {
+      const { api } = await import('@/lib/api');
+      const { useProfileStore } = await import('@/stores/profileStore');
+      const { useConsentStore: store } = await import('@/stores/consentStore');
+
+      // Save profile to backend if full profile was collected
+      const profile = useProfileStore.getState().profile;
+      if (profile) {
+        await api.profile.upsert({
+          preferred_name: profile.preferredName,
+          age_range: profile.ageRange,
+          gender_identity: profile.genderIdentity,
+          pronouns: profile.pronouns,
+          primary_language: profile.primaryLanguage,
+          disability: profile.disability,
+          immigration_status: profile.immigrationStatus,
+          indigenous_identity: profile.indigenousIdentity,
+          education_level: profile.educationLevel,
+          literacy_comfort_ai: profile.literacyComfortAI,
+          profile_mode: profile.profileMode,
+        });
+      }
+
+      // Save consent to backend
+      const consent = store.getState();
+      await api.profile.updateConsent({
+        profile_mode: consent.profileMode ?? undefined,
+        research_data_consent: consent.researchDataConsent,
+      });
+
+      // Mark onboarding complete
+      await api.auth.completeOnboarding();
+    } catch {
+      // best-effort
+    }
     useAuthStore.getState().completeOnboarding();
     useConsentStore.getState().setHasConsented(true);
     navigate('/chat');

@@ -138,22 +138,25 @@ export interface LoginRequestDTO {
   password: string;
 }
 
+export interface RegisterRequestDTO {
+  email: string;
+  password: string;
+  name: string;
+}
+
 export interface AuthUserDTO {
   id: string;
   email: string;
-  display_name: string;
-  role: 'client' | 'admin';
-  email_verified: boolean;
-  onboarding_completed: boolean;
+  name: string;
+  provider: string;
+  role: 'user' | 'admin';
+  verified: boolean;
   created_at: string;
 }
 
 export interface LoginResponseDTO {
   access_token: string;
-  refresh_token: string;
   token_type: string;
-  user: AuthUserDTO;
-  is_new_user: boolean;
 }
 
 // ── API methods ────────────────────────────────────────────
@@ -164,18 +167,49 @@ export const api = {
     ping: () => request<{ status: string }>('GET', '/health'),
   },
 
-  /** Authentication (dev mode — dummy admin user) */
+  /** Authentication (simplified — matches fastapi_auth) */
   auth: {
+    /** Register a new user account */
+    register: (body: RegisterRequestDTO) =>
+      request<{ message: string }>('POST', '/auth/register', body),
+
     /** Log in with email + password */
     login: (body: LoginRequestDTO) =>
       request<LoginResponseDTO>('POST', '/auth/login', body),
 
-    /** Authenticate with Google access token */
-    google: (accessToken: string) =>
-      request<LoginResponseDTO>('POST', '/auth/google', { id_token: accessToken }),
+    /** Admin login via .env credentials */
+    adminLogin: (body: LoginRequestDTO) =>
+      request<LoginResponseDTO>('POST', '/auth/admin/login', body),
+
+    /** Request password reset email */
+    forgotPassword: (email: string) =>
+      request<{ message: string }>('POST', '/auth/forgot-password', { email, password: '' }),
+
+    /** Reset password with token */
+    resetPassword: (token: string, password: string) =>
+      request<{ message: string }>('POST', `/auth/reset-password?token=${token}&password=${password}`),
+
+    /** Mark onboarding as complete */
+    completeOnboarding: () => request<{ status: string }>('POST', '/auth/onboarding/complete'),
 
     /** Get current user profile */
     me: () => request<AuthUserDTO>('GET', '/auth/me'),
+  },
+
+  /** Profile */
+  profile: {
+    /** Get user demographic profile */
+    get: () => request<any>('GET', '/profile'),
+
+    /** Create or update profile */
+    upsert: (data: any) => request<any>('PUT', '/profile', data),
+
+    /** Get consent preferences */
+    getConsent: () => request<any>('GET', '/profile/consent'),
+
+    /** Update consent preferences */
+    updateConsent: (data: { profile_mode?: string; research_data_consent?: boolean }) =>
+      request<any>('PUT', '/profile/consent', data),
   },
 
   /** Chat / RAG */

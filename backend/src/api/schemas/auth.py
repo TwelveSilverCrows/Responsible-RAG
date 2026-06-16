@@ -47,8 +47,8 @@ class LoginRequest(BaseModel):
 class GoogleAuthRequest(BaseModel):
     """Authenticate or register via Google OAuth."""
 
-    id_token: str = Field(
-        ..., description="Google ID token from the OAuth flow.",
+    access_token: str = Field(
+        ..., description="Google OAuth access token from @react-oauth/google.",
     )
 
 

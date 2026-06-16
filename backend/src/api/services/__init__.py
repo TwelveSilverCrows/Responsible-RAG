@@ -10,14 +10,12 @@ Low-memory note:
     (like the full RAG chain).  That belongs in ``api/deps.py``.
 """
 
-from src.api.services.auth_service import AuthService
 from src.api.services.user_service import UserService
 from src.api.services.chat_service import ChatService
 from src.api.services.source_service import SourceService
 from src.api.services.feedback_service import FeedbackService
 
 __all__ = [
-    "AuthService",
     "UserService",
     "ChatService",
     "SourceService",

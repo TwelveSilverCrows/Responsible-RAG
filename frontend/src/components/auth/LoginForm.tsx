@@ -4,14 +4,11 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Loader2, Eye, EyeOff, Shield, UserPlus, Lock } from 'lucide-react';
+import { Loader2, Eye, EyeOff } from 'lucide-react';
 
 import { useAuthStore } from '@/hooks/useAuth';
 import { api } from '@/lib/api';
 import { loginSchema, type LoginFormData } from '@/lib/schemas/profile.schema';
-import { useProfileStore } from '@/stores/profileStore';
-import { useConsentStore } from '@/stores/consentStore';
-import { seedClientDemo, seedAdminDemo, seedGeneralDemo, clearDemoData } from '@/lib/demoSeeder';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -29,8 +26,6 @@ export function LoginForm() {
   const navigate = useNavigate();
   const login = useAuthStore((s) => s.login);
   const loginAsNewUser = useAuthStore((s) => s.loginAsNewUser);
-  const profileStore = useProfileStore();
-  const consentStore = useConsentStore();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
@@ -51,88 +46,31 @@ export function LoginForm() {
         password: data.password,
       });
 
-      login(
-        {
-          id: res.user.id,
-          email: res.user.email,
-          displayName: res.user.display_name,
-          role: res.user.role,
-          emailVerified: res.user.email_verified,
-        },
-        res.access_token,
-        res.refresh_token,
-      );
+      // Decode JWT to get user info
+      const payload = JSON.parse(atob(res.access_token.split('.')[1]));
+      const role = payload.role === 'admin' ? 'admin' : 'user';
+      const email = payload.sub || data.email;
+      const needsOnboarding = payload.onboarding === true;
 
-      // Seed demo data for a smooth experience
-      seedGeneralDemo({ profileStore, consentStore });
-
-      navigate(res.user.role === 'admin' ? '/admin' : '/chat');
+      if (needsOnboarding) {
+        loginAsNewUser(
+          { id: email, email, displayName: email.split('@')[0], role, emailVerified: true },
+          res.access_token,
+        );
+        navigate('/onboarding/welcome', { replace: true });
+      } else {
+        login(
+          { id: email, email, displayName: email.split('@')[0], role, emailVerified: true },
+          res.access_token,
+        );
+        navigate(role === 'admin' ? '/admin' : '/chat');
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Login failed';
       form.setError('root', { message: msg });
     } finally {
       setIsSubmitting(false);
     }
-  }
-
-  function handleDemoClientLogin() {
-    login(
-      {
-        id: 'demo-client',
-        email: 'demo@responsible-ai.org',
-        displayName: 'Alex',
-        role: 'client',
-        emailVerified: true,
-      },
-      'mock-token',
-    );
-    seedClientDemo({ profileStore, consentStore });
-    navigate('/chat');
-  }
-
-  function handleDemoAdminLogin() {
-    login(
-      {
-        id: 'demo-admin',
-        email: 'admin@responsible-ai.org',
-        displayName: 'Admin',
-        role: 'admin',
-        emailVerified: true,
-      },
-      'mock-token',
-    );
-    seedAdminDemo({ profileStore, consentStore });
-    navigate('/admin');
-  }
-
-  function handleDemoGeneralLogin() {
-    login(
-      {
-        id: 'demo-general',
-        email: 'guest@responsible-ai.org',
-        displayName: 'Guest',
-        role: 'client',
-        emailVerified: true,
-      },
-      'mock-token',
-    );
-    seedGeneralDemo({ profileStore, consentStore });
-    navigate('/chat');
-  }
-
-  function handleNewUserDemo() {
-    loginAsNewUser(
-      {
-        id: 'demo-new-user',
-        email: 'newuser@responsible-ai.org',
-        displayName: 'New User',
-        role: 'client',
-        emailVerified: false,
-      },
-      'mock-token',
-    );
-    clearDemoData({ profileStore, consentStore });
-    navigate('/onboarding/welcome');
   }
 
   return (
@@ -145,54 +83,6 @@ export function LoginForm() {
           Sign in to continue to Responsible AI
         </p>
       </div>
-
-      {/* Quick Demo Buttons */}
-      <div className="bg-muted/50 rounded-lg p-4 space-y-3">
-        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider text-center">
-          Quick Demo Access
-        </p>
-        <div className="grid grid-cols-2 gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDemoClientLogin}
-            className="w-full text-xs"
-          >
-            <span className="truncate">👤 Client (Full Profile)</span>
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDemoAdminLogin}
-            className="w-full text-xs"
-          >
-            <Shield className="w-3 h-3 mr-1" />
-            <span className="truncate">Admin</span>
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDemoGeneralLogin}
-            className="w-full text-xs"
-          >
-            <Lock className="w-3 h-3 mr-1" />
-            <span className="truncate">Client (General)</span>
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleNewUserDemo}
-            className="w-full text-xs"
-          >
-            <UserPlus className="w-3 h-3 mr-1" />
-            <span className="truncate">New User</span>
-          </Button>
-        </div>
-        <p className="text-[10px] text-muted-foreground text-center">
-          Skip sign-in and explore the app instantly. &quot;New User&quot; walks through onboarding.
-        </p>
-      </div>
-
       <GoogleOAuthButton mode="signin" />
 
       <div className="relative">

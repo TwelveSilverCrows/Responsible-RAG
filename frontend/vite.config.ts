@@ -5,6 +5,7 @@ import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 
 export default defineConfig({
+  envDir: path.resolve(__dirname, '..'), // read root .env for VITE_* vars
   plugins: [react(), tsconfigPaths(), tailwindcss()],
   resolve: {
     alias: {

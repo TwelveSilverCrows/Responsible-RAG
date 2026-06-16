@@ -16,6 +16,9 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID:-}
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000/api/v1}
     image: rag-frontend:latest
     container_name: rag-frontend
     ports:
@@ -35,6 +38,9 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      # Docker frontend serves on port 3000 (dev) or behind Caddy (prod)
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
     volumes:
       - ./resources:/app/resources:ro
       - ./vectordb:/app/vectordb
@@ -59,6 +65,9 @@ services:
       - "443:443"
     env_file:
       - .env
+    environment:
+      # Prod: frontend goes through Caddy
+      FRONTEND_URL: https://${DOMAIN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

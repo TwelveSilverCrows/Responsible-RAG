@@ -43,7 +43,8 @@ dependencies = [
     "pyjwt>=2.8.0",
     "google-auth>=2.30.0",           # Verify Google OAuth ID tokens
     "authlib>=1.3.0",                # OAuth client (redirect flow)
-    "passlib[bcrypt]>=1.7.4",        # Password hashing
+    "bcrypt>=4.0.0",                 # Password hashing
+    "httpx>=0.27.0",                 # HTTP client (Google userinfo API)
     # ── Observability ───────────────────────────────────────────────────
     "langsmith>=0.8.8",
 ]
