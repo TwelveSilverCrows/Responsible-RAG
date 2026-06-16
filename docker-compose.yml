@@ -18,7 +18,9 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID:-}
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000/api/v1}
+        # Default uses relative path (works behind Caddy). For local dev without
+        # Docker, set VITE_API_URL=http://localhost:8000/api/v1 in .env.
+        VITE_API_URL: ${VITE_API_URL:-/api/v1}
     image: rag-frontend:latest
     container_name: rag-frontend
     ports:

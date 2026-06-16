@@ -89,9 +89,17 @@ async def get_google_user(access_token: str) -> dict:
 def create_verification_token(email: str) -> str:
     return create_token({"sub": email, "purpose": "verify"}, expires_delta=60 * 24)
 
+def get_backend_url() -> str:
+    """Return the backend base URL, preferring the configured domain."""
+    s = get_settings()
+    if s.domain:
+        return f"https://{s.domain}/api/v1"
+    return "http://localhost:8000/api/v1"
+
+
 def send_verification_email(to_email: str, token: str) -> None:
     settings = get_settings()
-    verify_url = f"http://localhost:8000/api/v1/auth/verify-email?token={token}"
+    verify_url = f"{get_backend_url()}/auth/verify-email?token={token}"
 
     if not settings.smtp_user or not settings.smtp_password:
         logger.info("SMTP not configured — verification URL for %s: %s", to_email, verify_url)

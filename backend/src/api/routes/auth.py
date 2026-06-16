@@ -9,7 +9,7 @@ from src.api.services.auth_service import (
     hash_password, verify_password,
     create_token, decode_token, create_verification_token,
     get_google_auth_url, exchange_google_code, get_google_user,
-    send_verification_email, serialize_user,
+    get_backend_url, send_verification_email, serialize_user,
 )
 from src.api.middleware import get_current_user, get_admin_user
 from src.api.db.database import get_users_collection
@@ -61,11 +61,10 @@ async def register(body: UserCreate, bg: BackgroundTasks):
     bg.add_task(send_verification_email, body.email, token)
 
     # In dev mode (SMTP not configured), return the verification URL
-    from src.core.config import get_settings
     settings = get_settings()
     resp = {"message": "Registered. Check your email to verify your account."}
     if not settings.smtp_user or not settings.smtp_password:
-        verify_url = f"http://localhost:8000/api/v1/auth/verify-email?token={token}"
+        verify_url = f"{get_backend_url()}/auth/verify-email?token={token}"
         resp["dev_verify_url"] = verify_url
     return resp
 
