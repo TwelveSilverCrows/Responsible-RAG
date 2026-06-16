@@ -11,7 +11,7 @@
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-export const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+export const BASE_URL = import.meta.env.VITE_API_URL || '/api/v1';
 
 /** Read a Bearer token from localStorage (set by the auth store). */
 export function _readAuthToken(): string | undefined {

@@ -45,12 +45,20 @@ class Settings(BaseSettings):
     admin_email: str = "admin@responsablefrontier.com"
     admin_password: str = "admin123"
 
-    # ── Frontend URL (for OAuth redirects & email verification links) ─────
+    # ── Domain (used by Caddy in prod profile) ─────────────────────────────
+    domain: str = ""
+
+    # ── Frontend URL (OAuth redirects & email verification links) ─────────
+    # Dev:     http://localhost:5173 (Vite) or http://localhost:3000 (Docker)
+    # Prod:    https://YOUR_DOMAIN
     frontend_url: str = "http://localhost:5173"
 
     # ── Google OAuth ──────────────────────────────────────────────────────
     google_client_id: str = ""
     google_client_secret: str = ""
+    # Must match "Authorized redirect URIs" in Google Cloud Console
+    # Dev:  http://localhost:8000/api/v1/auth/google/callback
+    # Prod: https://YOUR_DOMAIN/api/v1/auth/google/callback
     google_redirect_uri: str = "http://localhost:8000/api/v1/auth/google/callback"
 
     # ── SMTP (email verification) ──────────────────────────────────────────
@@ -59,6 +67,10 @@ class Settings(BaseSettings):
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from: str = ""
+
+
+
+
 
     # ── Chunking ──────────────────────────────────────────────────────────────
     use_semantic_chunking: bool = True

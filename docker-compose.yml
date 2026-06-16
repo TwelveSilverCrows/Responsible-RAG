@@ -1,8 +1,8 @@
 # =============================================================================
 # docker-compose.yml
 # =============================================================================
-# Dev:     docker compose up --build -d
-# Prod:    docker compose --profile prod up --build -d
+# Dev:     docker compose -f docker-compose.yml up --build -d
+# Prod:    docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
 # Stop:    docker compose down
 # Logs:    docker compose logs -f <service>
 # =============================================================================
@@ -53,10 +53,9 @@ services:
       start_period: 30s
 
   # ---------------------------------------------------------------------------
-  # Caddy — Reverse proxy with auto HTTPS (prod only)
+  # Caddy — Reverse proxy with auto HTTPS
   # ---------------------------------------------------------------------------
   caddy:
-    profiles: ["prod"]
     image: caddy:2-alpine
     container_name: rag-caddy
     restart: unless-stopped
@@ -65,9 +64,6 @@ services:
       - "443:443"
     env_file:
       - .env
-    environment:
-      # Prod: frontend goes through Caddy
-      FRONTEND_URL: https://${DOMAIN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

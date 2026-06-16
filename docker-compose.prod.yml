@@ -1,0 +1,18 @@
+# =============================================================================
+# docker-compose.prod.yml — Production overrides
+# =============================================================================
+# Use with:  docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
+# Sets the correct URLs for production using your DOMAIN from .env.
+# =============================================================================
+
+services:
+
+  frontend:
+    build:
+      args:
+        VITE_API_URL: https://${DOMAIN}/api/v1
+
+  backend:
+    environment:
+      FRONTEND_URL: https://${DOMAIN}
+      GOOGLE_REDIRECT_URI: https://${DOMAIN}/api/v1/auth/google/callback
