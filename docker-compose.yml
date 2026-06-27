@@ -81,9 +81,9 @@ services:
       # Docker frontend serves on port 3000 (dev) or behind Caddy (prod)
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       # Point to the local Docker MongoDB service
-      # authSource=responsible_rag matches the database where init.js
-      # creates the app user.
-      MONGO_URI: ${MONGO_URI:-mongodb://rag:ragpassword@mongo:27017/responsible_rag?authSource=responsible_rag}
+      # authSource=admin uses the root admin user created automatically by
+      # MONGO_INITDB_ROOT_USERNAME/PASSWORD (always exists).
+      MONGO_URI: ${MONGO_URI:-mongodb://rag:ragpassword@mongo:27017/responsible_rag?authSource=admin}
     volumes:
       - ./resources:/app/resources:ro
       - ./vectordb:/app/vectordb
