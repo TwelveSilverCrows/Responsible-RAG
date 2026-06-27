@@ -106,6 +106,8 @@ class SourceService:
             "internal_notes": data.get("internal_notes") or "",
             "status": "processing",
             "error_message": "",
+            "pending_file_path": data.get("pending_file_path", ""),
+            "pending_filename": data.get("pending_filename", ""),
         }
         placeholder = [Document(page_content="", metadata={})]
         kb.add_documents(source_id, source_meta, placeholder)
@@ -113,27 +115,40 @@ class SourceService:
         logger.info("Created placeholder source %s (%s)", source_id, source_meta["title"])
         return source_meta
 
-    def finalize_source(self, source_id: str, docs: list[Document]) -> None:
+    def finalize_source(self, source_id: str, docs: list[Document],
+                       override_meta: Optional[dict] = None) -> None:
         """
         Replace a placeholder with real chunks and set status="indexed".
 
         Called by the background ingestion task after successful processing.
+
+        Parameters
+        ----------
+        override_meta:
+            If provided, use this metadata dict *instead* of reading from
+            TurboVec. This avoids races when the placeholder has been
+            updated concurrently by a PUT request.
         """
         kb = self._get_kb()
-        # Get existing metadata (includes user-provided fields)
-        existing = kb.get_source(source_id)
-        if not existing:
-            logger.warning("finalize_source: source %s not found", source_id)
-            return
 
-        # Remove old placeholder(s)
+        if override_meta is not None:
+            source_meta = dict(override_meta)
+        else:
+            existing = kb.get_source(source_id)
+            if not existing:
+                logger.warning("finalize_source: source %s not found", source_id)
+                return
+            source_meta = dict(existing)
+
+        # Remove old placeholder(s) — ignore if already gone (race).
         kb.delete_source(source_id)
 
-        # Store real chunks with same metadata + status="indexed"
-        source_meta = {k: v for k, v in existing.items()
-                       if k not in ("turbovec_id", "chunk_index")}
+        # Strip internal fields & mark as indexed
+        for strip_key in ("turbovec_id", "chunk_index", "pending_file_path", "pending_filename"):
+            source_meta.pop(strip_key, None)
         source_meta["status"] = "indexed"
         source_meta["error_message"] = ""
+
         kb.add_documents(source_id, source_meta, docs)
         logger.info("Finalized source %s — %d chunks indexed", source_id, len(docs))
 

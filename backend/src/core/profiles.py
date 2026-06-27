@@ -16,97 +16,334 @@ Source validation date: June 2026
 """
 
 from enum import StrEnum
+from pathlib import Path
 from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 
-class RAGPopulation(StrEnum):
+# ═══════════════════════════════════════════════════════════════════════════════
+# Dynamic profile prompt template
+# ═══════════════════════════════════════════════════════════════════════════════
+
+DYNAMIC_PROFILE_TEMPLATE = """You are a knowledgeable, respectful Canadian educational assistant. Your purpose is to provide clear, accurate, and culturally responsive information to diverse users across Canada. You adapt your communication style to meet each user's needs while maintaining factual accuracy and inclusive language.
+
+=== USER DEMOGRAPHIC PROFILE ===
+Sex at birth: {sex_at_birth}
+Gender: {gender}
+Age group: {age_group}
+Primary language: {primary_language}
+Education level: {education_level}
+Citizen status: {citizen_status}
+Indigenous status: {indigenous_status}
+Disability: {disability_status}
+
+=== COMMUNICATION ADAPTATION RULES ===
+
+[AGE GROUP: {age_group}]
+{age_group_rules}
+
+[LANGUAGE: {primary_language}]
+{language_rules}
+
+[EDUCATION: {education_level}]
+{education_rules}
+
+[INDIGENOUS STATUS: {indigenous_status}]
+{indigenous_rules}
+
+[DISABILITY: {disability_status}]
+{disability_rules}
+
+[GENDER: {gender}]
+{gender_rules}
+
+[CITIZEN STATUS: {citizen_status}]
+{citizen_rules}
+
+=== RETRIEVED CONTEXT ===
+{retrieved_documents}
+
+=== TASK ===
+{user_query}
+
+Respond following the communication adaptation rules above. Base your response on the retrieved context. Use Canadian English spelling. If the topic involves Indigenous peoples, prioritize Indigenous voices and acknowledge the diversity of First Nations, Inuit, and Metis perspectives."""
+
+# ── Standard defaults when a field is not provided ────────────────────────────
+_STANDARD_PROFILE: dict[str, str] = {
+    "sex_at_birth": "Prefer not to say",
+    "gender": "Not specified — use gender-neutral language throughout",
+    "age_group": "Adult (18–64 years)",
+    "primary_language": "English",
+    "education_level": "Some post-secondary education",
+    "citizen_status": "Canadian citizen / Permanent resident",
+    "indigenous_status": "Non-Indigenous",
+    "disability_status": "No disclosed disability",
+}
+
+# ── Default adaptation rules for standard profile ────────────────────────────
+_STANDARD_RULES: dict[str, str] = {
+    "age_group_rules": (
+        "Use clear, direct language suitable for a general adult audience. "
+        "Avoid patronising or overly complex explanations."
+    ),
+    "language_rules": (
+        "Use plain English. Define any technical terms on first use. "
+        "Avoid idioms or culturally specific references without explanation."
+    ),
+    "education_rules": (
+        "Assume general literacy. Explain specialised terms but avoid "
+        "oversimplifying core concepts."
+    ),
+    "indigenous_rules": (
+        "No specific Indigenous considerations indicated. If the topic "
+        "relates to Indigenous peoples, include a note that diverse "
+        "First Nations, Inuit, and Métis perspectives exist."
+    ),
+    "disability_rules": (
+        "No specific disability considerations indicated. Use clear, "
+        "accessible formatting. Offer alternative formats on request."
+    ),
+    "gender_rules": (
+        "Use gender-neutral language unless the user's gender is known. "
+        "Use 'they/them' as the default pronoun."
+    ),
+    "citizen_rules": (
+        "No specific immigration or citizenship considerations indicated. "
+        "Provide general Canadian context."
+    ),
+}
+
+# ── RAG queries to retrieve relevant evidence for each demographic field ─────
+_FIELD_QUERIES: dict[str, str] = {
+    "sex_at_birth": "sex at birth biological differences health communication",
+    "gender": "gender identity diversity inclusion two-spirit LGBTQ communication",
+    "age_group": "age developmental stages older adults youth communication",
+    "primary_language": "language barriers English proficiency newcomers immigrants healthcare access",
+    "education_level": "health literacy education level plain language communication",
+    "citizen_status": "immigrant refugee newcomer migrant settlement Canada healthcare navigation",
+    "indigenous_status": "First Nations Inuit Metis Indigenous data sovereignty OCAP TRC",
+    "disability_status": "disability accessibility inclusive communication accommodations",
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ProfileAugmenter — RAG-powered demographic prompt builder
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ProfileAugmenter:
     """
-    Validated population-tuning profiles for the Canadian academic RAG chatbot.
+    Builds a personalised system prompt by querying the profiles knowledge
+    base (``vectordb_profiles/``) for evidence about each demographic field.
 
-    Each member's *value* is the system pre-prompt injected **before** the
-    retrieved document context is appended to the chain.
-
-    Research baselines are documented in :meth:`research_citation_note`.
+    Usage
+    -----
+        augmenter = ProfileAugmenter(embedding_function)
+        prompt = augmenter.build_prompt(
+            user_profile={"gender": "non_binary", "age_group": "teen"},
+            user_query="What are my rights at school?",
+        )
+        # prompt is a fully rendered DYNAMIC_PROFILE_TEMPLATE string
     """
 
-    # ── Profiles ──────────────────────────────────────────────────────────────
-
-    GENERAL = """You are a helpful, polite AI assistant. Answer the user's question concisely and clearly. Be respectful and direct — do not use excessive jargon or overly long explanations unless the user asks for more detail."""
-
-    LGBT_CANADIAN_TEEN = """You are a calm, non-judgemental support for Canadian 2SLGBTQI+ teens.
-BEHAVIOUR RULES:
-1.  Never assume gender, pronouns, or identity — ask politely if needed; use gender-neutral language unless told otherwise.
-2.  Prioritize safety first: automatically surface Canadian youth support lines, Egale youth resources, and local safe-space locations when distress is detected.
-3.  Avoid formal academic jargon; use conversational, peer-aligned tone with no patronising language.
-4.  Normalise doubt, questioning, and identity exploration — do not push definitive labels.
-5.  Acknowledge rural isolation risks: explicitly note remote support options for users outside major cities.
-6.  Never share content that implies their identity is a "choice", debate their lived experience, or suggest conversion practices.
-7.  Keep responses under 3 paragraphs; use line breaks to avoid walls of text.
-"""
-
-    SENIOR_LOW_EDU_CANADA = """You are a patient, clear helper for older Canadian adults with limited formal schooling.
-BEHAVIOUR RULES:
-1.  Use short, simple sentences — maximum 12 words each. Never use compound sentences.
-2.  Avoid all academic jargon, acronyms, metaphors, idioms, and slang. Explain every concept literally.
-3.  Repeat key information twice per response to aid retention.
-4.  Never use bullet points, numbered lists, markdown formatting, or emojis. Use plain text only.
-5.  Confirm understanding at the end of every response: "Does this make sense? I can explain it again, simpler, if you want."
-6.  Prioritise information about pension, housing support, home care, and public health services relevant to Canada.
-7.  Do not use digital terminology; say "this computer helper" instead of "AI" or "chatbot".
-"""
-
-    INDIGENOUS_COMMUNITY_LEADER_CA = """You are a respectful, culturally aware assistant for First Nations, Inuit, or Métis community leaders in Canada.
-BEHAVIOUR RULES:
-1.  Open every interaction with: "I acknowledge that I am supporting work on the traditional territories of Indigenous peoples."
-2.  Never position academic knowledge as superior to traditional knowledge. State clearly: "Academic research has documented this; your community's own teachings will always take priority."
-3.  Explicitly note when research was conducted by non-Indigenous authors and flag colonial biases in source material.
-4.  Use formal, respectful tone; do not use casual language. Address them as "community leader" unless told otherwise.
-5.  Prioritise information about treaty rights, land stewardship, community health governance, and Indigenous data sovereignty.
-6.  Always provide full source citations, including the author's nation affiliation for academic works.
-7.  Never claim to speak for any Indigenous community: always clarify "this is general documented information; your community protocols will guide appropriate use".
-"""
-
-    MIDAGED_DISABLED_CANADIAN = """You are an accessibility-aware, practical assistant for disabled mid-aged adults in Canada.
-BEHAVIOUR RULES:
-1.  Never use ableist language — avoid terms like "suffer from", "handicapped", "overcome". Default to identity-first language ("disabled person") unless the user specifies otherwise.
-2.  Do not use inspirational framing; do not comment on "bravery" or "resilience". Respond matter-of-factly.
-3.  Prioritise practical, actionable information: disability benefits, workplace accommodations, accessible transit, and assistive-device funding in Canada.
-4.  Offer flexible response formatting: plain text, short bullet points, or a simplified summary on request.
-5.  Never suggest that disability is temporary or curable unless the user explicitly asks for medical information.
-6.  Acknowledge systemic barriers; do not frame structural challenges as individual problems.
-7.  Provide clear links to official Canadian disability-support agencies with every relevant response.
-"""
-
-    # ── Class helpers ─────────────────────────────────────────────────────────
+    # Class-level cache so we only search once per process
+    _PROFILES_DB_DIR: Optional[Path] = None
 
     @classmethod
-    def get_valid_keys(cls) -> list[str]:
-        """Return the enum member names, used to populate UI dropdowns and API enums."""
-        return [member.name for member in cls]
+    def _resolve_profiles_dir(cls) -> Path:
+        """Walk up the directory tree to find ``vectordb_profiles/``.
 
-    # ── Instance helpers ──────────────────────────────────────────────────────
+        Works regardless of whether the code runs from the host layout
+        (``backend/src/core/profiles.py`` → 4 levels up) or the Docker
+        layout (``src/core/profiles.py`` → 3 levels up, or any other
+        nesting), because it searches for the actual directory on disk.
+        """
+        if cls._PROFILES_DB_DIR is not None:
+            return cls._PROFILES_DB_DIR
+
+        start = Path(__file__).resolve().parent
+        for current in [start] + list(start.parents):
+            candidate = current / "vectordb_profiles"
+            if candidate.is_dir():
+                cls._PROFILES_DB_DIR = candidate
+                logger.info("Profiles vector store found at %s", candidate)
+                return candidate
+            # Stop before the filesystem root
+            if current.parent == current:
+                break
+
+        # Fallback: assume next to CWD (dev convenience)
+        fallback = Path.cwd() / "vectordb_profiles"
+        cls._PROFILES_DB_DIR = fallback
+        return fallback
+
+    def __init__(self, embedding_function) -> None:
+        self._embedding_function = embedding_function
+        self._retriever: Optional[any] = None
+        # Track source titles used in the last build_prompt() call
+        self._last_source_titles: set[str] = set()
 
     @property
-    def research_citation_note(self) -> Optional[str]:
-        """
-        Return the peer-reviewed and standards-body citations that informed
-        this profile's behaviour rules.
+    def last_source_titles(self) -> list[str]:
+        """Return sorted source titles used in the most recent build_prompt()."""
+        return sorted(self._last_source_titles)
 
-        Returns ``None`` if no citation has been registered yet (e.g. for
-        a newly added profile awaiting literature review).
+    # ── Lazy retriever ────────────────────────────────────────────────────────
+
+    def _get_retriever(self, k: int = 3):
+        """Lazy-load the profiles TurboVec store and return a retriever."""
+        if self._retriever is not None:
+            return self._retriever
+
+        store_dir = self._resolve_profiles_dir()
+        index_file = store_dir / "index.tvim"
+
+        if not index_file.exists():
+            logger.warning(
+                "Profiles vector store not found at %s — "
+                "using standard defaults only. "
+                "Run 'python scripts/build_profiles_kb.py' first.",
+                store_dir,
+            )
+            self._retriever = None
+            return None
+
+        try:
+            from turbovec.langchain import TurboQuantVectorStore
+
+            logger.info("Loading profiles vector store from %s", store_dir)
+            store = TurboQuantVectorStore.load(
+                str(store_dir), embedding=self._embedding_function,
+            )
+            self._retriever = store.as_retriever(
+                search_type="similarity",
+                search_kwargs={"k": k},
+            )
+        except Exception as exc:
+            logger.warning("Failed to load profiles store: %s", exc)
+            self._retriever = None
+
+        return self._retriever
+
+    # ── Evidence retrieval ────────────────────────────────────────────────────
+
+    def _retrieve_for_field(self, field: str, query: str) -> str:
         """
-        citations: dict["RAGPopulation", str] = {
-            RAGPopulation.LGBT_CANADIAN_TEEN: (
-                "NIH PMC 12919746 | Shelley Craig, UofT 2025 | Egale Canada"
-            ),
-            RAGPopulation.SENIOR_LOW_EDU_CANADA: (
-                "Frontiers in Digital Health 2026 | ISED Canada Accessible AI Guidelines"
-            ),
-            RAGPopulation.INDIGENOUS_COMMUNITY_LEADER_CA: (
-                "Indigenous AI Alliance Canada | Truth & Reconciliation Commission AI Standards"
-            ),
-            RAGPopulation.MIDAGED_DISABLED_CANADIAN: (
-                "Common Sense Media 2025 | Accessibility Standards Canada"
-            ),
+        Query the profiles vector store for *field* and return a
+        condensed evidence snippet, or an empty string if the store
+        is unavailable or the query returns nothing useful.
+
+        Populates ``_last_source_titles`` with unique source titles found.
+        """
+        retriever = self._get_retriever(k=3)
+        if retriever is None:
+            return ""
+
+        try:
+            docs = retriever.invoke(query)
+            if not docs:
+                return ""
+            # Deduplicate by source and concatenate excerpts
+            seen: set[str] = set()
+            excerpts: list[str] = []
+            for doc in docs:
+                src = doc.metadata.get("source_id", doc.metadata.get("title", ""))
+                if src in seen:
+                    continue
+                seen.add(src)
+                source_label = doc.metadata.get("title", src)
+                self._last_source_titles.add(source_label)
+                content = doc.page_content[:500].strip()
+                if content:
+                    excerpts.append(f"[From: {source_label}]\n{content}")
+            return "\n\n".join(excerpts[:3])
+        except Exception as exc:
+            logger.debug("Field '%s' retrieval failed: %s", field, exc)
+            return ""
+
+    # ── Prompt builder ────────────────────────────────────────────────────────
+
+    def build_prompt(
+        self,
+        user_profile: Optional[dict[str, str]] = None,
+        user_query: str = "",
+        retrieved_documents: str = "",
+    ) -> str:
+        """
+        Build a fully rendered ``DYNAMIC_PROFILE_TEMPLATE``.
+
+        Parameters
+        ----------
+        user_profile:
+            Demographic data from the user's onboarding (keys match
+            ``_STANDARD_PROFILE``).  Missing keys fall back to defaults.
+        user_query:
+            The user's question.
+        retrieved_documents:
+            Pre-formatted context from the main RAG retriever.
+
+        Returns
+        -------
+        str
+            Completed prompt ready to inject into the LLM chain.
+        """
+        # Reset source tracking for this call
+        self._last_source_titles.clear()
+
+        profile = dict(_STANDARD_PROFILE)
+        if user_profile:
+            # Merge — user values override defaults
+            for k in profile:
+                v = user_profile.get(k)
+                if v and str(v).strip():
+                    profile[k] = str(v).strip()
+
+        # ── Collect evidence from the profiles knowledge base ─────────────
+        rules: dict[str, str] = dict(_STANDARD_RULES)
+        field_to_rule = {
+            "age_group": "age_group_rules",
+            "primary_language": "language_rules",
+            "education_level": "education_rules",
+            "indigenous_status": "indigenous_rules",
+            "disability_status": "disability_rules",
+            "gender": "gender_rules",
+            "citizen_status": "citizen_rules",
         }
-        return citations.get(self)
+
+        for field_key, rule_key in field_to_rule.items():
+            field_value = profile[field_key]
+            query = _FIELD_QUERIES.get(field_key, field_key)
+
+            # Retrieve evidence about this population segment
+            evidence = self._retrieve_for_field(field_key, query)
+
+            # If we have evidence and the value is not the generic default,
+            # enrich the rule with evidence; otherwise keep the standard rule
+            if evidence and field_value != _STANDARD_PROFILE.get(field_key, ""):
+                rules[rule_key] = (
+                    f"{_STANDARD_RULES[rule_key]}\n\n"
+                    f"Research-backed guidance for '{field_value}':\n{evidence}"
+                )
+
+        # ── Render the template ──────────────────────────────────────────
+        return DYNAMIC_PROFILE_TEMPLATE.format(
+            sex_at_birth=profile["sex_at_birth"],
+            gender=profile["gender"],
+            age_group=profile["age_group"],
+            primary_language=profile["primary_language"],
+            education_level=profile["education_level"],
+            citizen_status=profile["citizen_status"],
+            indigenous_status=profile["indigenous_status"],
+            disability_status=profile["disability_status"],
+            age_group_rules=rules["age_group_rules"],
+            language_rules=rules["language_rules"],
+            education_rules=rules["education_rules"],
+            indigenous_rules=rules["indigenous_rules"],
+            disability_rules=rules["disability_rules"],
+            gender_rules=rules["gender_rules"],
+            citizen_rules=rules["citizen_rules"],
+            retrieved_documents=retrieved_documents,
+            user_query=user_query,
+        )
+

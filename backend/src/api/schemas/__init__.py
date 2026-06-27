@@ -26,6 +26,8 @@ from src.api.schemas.profile import (
     ConsentResponse,
     ConsentUpdateRequest,
     ProfileMode,
+    GenerateProfileRequest,
+    GenerateProfileResponse,
 )
 
 # Chat
@@ -84,6 +86,8 @@ __all__ = [
     "ConsentResponse",
     "ConsentUpdateRequest",
     "ProfileMode",
+    "GenerateProfileRequest",
+    "GenerateProfileResponse",
     # Chat
     "ChatRequest",
     "ChatResponse",

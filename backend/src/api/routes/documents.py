@@ -14,7 +14,6 @@ from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Backgro
 
 from src.api.schemas.source import UploadResponse
 from src.api.middleware import require_current_user
-from src.api.db.models import User
 from src.api.services.source_service import SourceService
 
 router = APIRouter()
@@ -28,7 +27,7 @@ from src.api.routes.admin.sources import _process_upload
 async def upload_document(
     file: UploadFile = File(...),
     background_tasks: BackgroundTasks = BackgroundTasks(),
-    user: User = Depends(require_current_user),
+    current_user: dict = Depends(require_current_user),
 ):
     """
     Upload a document file → background ingestion.

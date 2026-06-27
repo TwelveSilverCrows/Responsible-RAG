@@ -14,7 +14,7 @@ export interface ExtractedMetadata {
 
 export async function extractMetadataFromUrl(url: string): Promise<ExtractedMetadata> {
   try {
-    const response = await fetch(`/api/metadata?url=${encodeURIComponent(url)}`);
+    const response = await fetch(`/api/v1/metadata?url=${encodeURIComponent(url)}`);
     if (!response.ok) {
       throw new Error('Failed to fetch metadata');
     }

@@ -16,7 +16,6 @@ from fastapi import APIRouter, Depends
 from src.api.schemas.chat import ChatRequest
 from src.api.deps import get_rag_chain
 from src.api.middleware import get_current_user
-from src.api.db.models import User
 from src.core.rag_chain import RAGChain
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -51,7 +50,7 @@ router = APIRouter()
 async def search(
     body: SearchRequest,
     chain: RAGChain = Depends(get_rag_chain),
-    user: User | None = Depends(get_current_user),
+    current_user: dict | None = Depends(get_current_user),
 ):
     """
     Retrieve the most relevant chunks for a given query.

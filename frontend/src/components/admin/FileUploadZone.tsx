@@ -31,7 +31,13 @@ interface FileUploadZoneProps {
   onUploadComplete: (files: UploadedFile[]) => void;
 }
 
-const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+// Per-source-type file size limits
+const SIZE_LIMITS: Record<string, number> = {
+  pdf: 100 * 1024 * 1024,   // 100 MB
+  audio: 500 * 1024 * 1024,  // 500 MB
+  text: 15 * 1024 * 1024,    // 15 MB
+};
+const DEFAULT_SIZE_LIMIT = 50 * 1024 * 1024;
 
 export function FileUploadZone({ sourceType, onUploadComplete }: FileUploadZoneProps) {
   const [files, setFiles] = useState<UploadedFile[]>([]);
@@ -89,10 +95,12 @@ export function FileUploadZone({ sourceType, onUploadComplete }: FileUploadZoneP
     [uploadFile]
   );
 
+  const maxSizeLimit = SIZE_LIMITS[sourceType] || DEFAULT_SIZE_LIMIT;
+
   const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
     onDrop,
     accept: Object.keys(acceptTypes).length > 0 ? acceptTypes : undefined,
-    maxSize: MAX_FILE_SIZE,
+    maxSize: maxSizeLimit,
     multiple: true,
     noClick: false,
   });
@@ -143,7 +151,7 @@ export function FileUploadZone({ sourceType, onUploadComplete }: FileUploadZoneP
             </>
           )}
           <p className="text-xs text-muted-foreground mt-2">
-            Accepted: {config.acceptTypes || 'Any file'} • Maximum file size: 50MB
+            Accepted: {config.acceptTypes || 'Any file'} • Maximum file size: {(SIZE_LIMITS[sourceType] || DEFAULT_SIZE_LIMIT) / (1024 * 1024)}MB
           </p>
         </div>
       </div>

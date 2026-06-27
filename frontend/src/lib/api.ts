@@ -210,6 +210,13 @@ export const api = {
     /** Update consent preferences */
     updateConsent: (data: { profile_mode?: string; research_data_consent?: boolean }) =>
       request<any>('PUT', '/profile/consent', data),
+
+    /** Generate personalised system prompt from demographic data */
+    generate: (data: {
+      user_profile?: Record<string, string>;
+      user_query: string;
+      retrieved_documents?: string;
+    }) => request<GenerateProfileResponseDTO>('POST', '/profile/generate', data),
   },
 
   /** Chat / RAG */
@@ -300,6 +307,47 @@ export const api = {
     /** Get dashboard stats */
     stats: () =>
       request<StatsResponseDTO>('GET', '/admin/dashboard/stats'),
+  },
+
+  /** Admin users management */
+  users: {
+    /** List all users (optionally search by name/email) */
+    list: (search?: string) => {
+      const params = search ? `?search=${encodeURIComponent(search)}` : '';
+      return request<UserAdminDTO[]>('GET', `/admin/users${params}`);
+    },
+
+    /** Get aggregate user statistics */
+    stats: () =>
+      request<UserStatsDTO>('GET', '/admin/users/stats'),
+
+    /** Get a single user */
+    get: (id: string) =>
+      request<UserAdminDTO>('GET', `/admin/users/${id}`),
+
+    /** Update a user */
+    update: (id: string, body: AdminUserUpdateDTO) =>
+      request<UserAdminDTO>('PATCH', `/admin/users/${id}`, body),
+
+    /** Delete a user and all associated data */
+    delete: (id: string) =>
+      request<{ message: string }>('DELETE', `/admin/users/${id}`),
+
+    /** Get user's demographic profile */
+    getProfile: (id: string) =>
+      request<UserProfileAdminDTO>('GET', `/admin/users/${id}/profile`),
+
+    /** Get user's consent preferences */
+    getConsent: (id: string) =>
+      request<UserConsentAdminDTO>('GET', `/admin/users/${id}/consent`),
+
+    /** Get user's conversations */
+    getConversations: (id: string, page = 1, limit = 20) =>
+      request<UserConversationsDTO>('GET', `/admin/users/${id}/conversations?page=${page}&limit=${limit}`),
+
+    /** Get user's activity stats */
+    getActivity: (id: string) =>
+      request<UserActivityDTO>('GET', `/admin/users/${id}/activity`),
   },
 };
 
@@ -401,4 +449,110 @@ export interface StatsResponseDTO {
   processing_sources: number;
   error_sources: number;
   incomplete_metadata: number;
+}
+
+export interface AdaptationFieldDTO {
+  field: string;
+  label: string;
+  value: string;
+  evidence_found: boolean;
+}
+
+export interface GenerateProfileResponseDTO {
+  prompt: string;
+  prompt_length: number;
+  fields_provided: number;
+  sources_used: string[];
+  adaptation_fields: AdaptationFieldDTO[];
+}
+
+// ── Admin / User DTOs ─────────────────────────────────────────
+
+export interface UserAdminDTO {
+  id: string;
+  email: string;
+  name: string;
+  provider: string;
+  role: 'user' | 'admin';
+  verified: boolean;
+  onboarding_completed: boolean;
+  created_at: string;
+  has_profile: boolean;
+  profile_mode: 'full' | 'general';
+  has_consent: boolean;
+  research_data_consent: boolean;
+  conversation_count: number;
+  message_count: number;
+}
+
+export interface AdminUserUpdateDTO {
+  name?: string;
+  password?: string;
+  role?: 'user' | 'admin';
+  verified?: boolean;
+}
+
+export interface UserStatsDTO {
+  total_users: number;
+  admin_users: number;
+  verified_users: number;
+  onboarding_completed: number;
+  users_with_profiles: number;
+  full_privacy_mode: number;
+  consent_granted: number;
+  research_data_consent: number;
+  total_conversations: number;
+  total_messages: number;
+}
+
+export interface UserProfileAdminDTO {
+  user_id: string;
+  has_profile: boolean;
+  profile_mode: 'full' | 'general';
+  research_data_consent: boolean;
+  data: {
+    preferred_name: string | null;
+    age_range: string | null;
+    gender_identity: string[] | null;
+    pronouns: string | null;
+    primary_language: string | null;
+    disability: string[] | null;
+    immigration_status: string | null;
+    indigenous_identity: string | null;
+    education_level: string | null;
+    literacy_comfort_ai: number | null;
+  } | null;
+  redacted: boolean;
+}
+
+export interface UserConsentAdminDTO {
+  user_id: string;
+  has_consented: boolean;
+  profile_mode: 'full' | 'general';
+  research_data_consent: boolean;
+  consented_at: string | null;
+  updated_at: string | null;
+}
+
+export interface UserConversationItemDTO {
+  id: string;
+  title: string;
+  profile_key: string | null;
+  message_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserConversationsDTO {
+  conversations: UserConversationItemDTO[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface UserActivityDTO {
+  conversation_count: number;
+  message_count: number;
+  last_conversation_at: string | null;
+  last_message_at: string | null;
 }

@@ -28,7 +28,8 @@ class Settings(BaseSettings):
 
     # ── LLM ───────────────────────────────────────────────────────────────────
     llm_model: str = "deepseek-chat"
-    llm_temperature: float = 0.2
+    llm_profile: str = "deepseek-v4-flash"
+    llm_temperature: float = 0.5
     deepseek_api_key: str = ""
 
     # ── Embeddings (Hugging Face Inference API) ───────────────────────────────
@@ -67,10 +68,6 @@ class Settings(BaseSettings):
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from: str = ""
-
-
-
-
 
     # ── Chunking ──────────────────────────────────────────────────────────────
     use_semantic_chunking: bool = True

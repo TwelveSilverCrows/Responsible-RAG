@@ -19,8 +19,6 @@ Usage:
 
 import logging
 from typing import Optional
-
-import certifi
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
 
@@ -56,13 +54,7 @@ async def get_db():
     try:
         _client = MongoClient(
             settings.mongo_uri,
-            maxPoolSize=2,
-            serverSelectionTimeoutMS=30000,   # Atlas can be slow on cold start
-            connectTimeoutMS=15000,           # SSL handshake needs time
-            socketTimeoutMS=30000,
-            tls=True,                         # Explicit TLS (required by Atlas)
-            tlsCAFile=certifi.where(),        # Use certifi's CA bundle
-            tlsAllowInvalidCertificates=False, # Verify certs — keeps it secure
+            serverSelectionTimeoutMS=5000
         )
         # Verify connection
         _client.admin.command("ping")

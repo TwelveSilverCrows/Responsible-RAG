@@ -16,8 +16,14 @@ export const profileSchema = z.object({
 export type ProfileFormData = z.infer<typeof profileSchema>;
 
 export const loginSchema = z.object({
-  email: z.email('Please enter a valid email address'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
+  email: z
+    .string()
+    .min(1, 'Email or username is required')
+    .refine(
+      (v) => v.includes('@') || v.toLowerCase() === 'admin',
+      'Please enter a valid email address or "admin"',
+    ),
+  password: z.string().min(1, 'Password is required'),
 });
 
 export type LoginFormData = z.infer<typeof loginSchema>;

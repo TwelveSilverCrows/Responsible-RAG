@@ -127,7 +127,7 @@ export function AddSourceWizard() {
             await api.sources.update(f.sourceId, metadataPayload);
           }
         }
-        toast.success(`${uploadedFiles.length} file(s) updated with metadata`);
+        toast.success('SAVED, processing now — your file is being chunked and embedded in the background.');
       } else {
         // Metadata-only source
         await api.sources.create(metadataPayload);

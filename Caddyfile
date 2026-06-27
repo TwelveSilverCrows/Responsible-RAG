@@ -11,6 +11,9 @@
 
     # ── Backend (FastAPI) under /api/v1/ ──────────────────────────────────────
     handle_path /api/v1/* {
+        request_body {
+            max_size 500MB
+        }
         reverse_proxy backend:8000
     }
 

@@ -1,25 +1,31 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useConsentStore } from '@/stores/consentStore';
+import { useProfileStore } from '@/stores/profileStore';
 import { useAuthStore } from '@/hooks/useAuth';
 import { ConsentStep } from './ConsentStep';
 import { ProfileModeSelector } from './ProfileModeSelector';
+import { ProfileProcessingStep } from './ProfileProcessingStep';
+import { ProfileReviewStep } from './ProfileReviewStep';
+import type { GenerateProfileResponseDTO } from '@/lib/api';
 
-type WizardStep = 'welcome' | 'consent' | 'profile';
+type WizardStep = 'welcome' | 'consent' | 'profile' | 'processing' | 'review';
 
 const STEPS: { key: WizardStep; label: string }[] = [
   { key: 'welcome', label: 'Welcome' },
   { key: 'consent', label: 'Privacy' },
   { key: 'profile', label: 'Profile' },
+  { key: 'processing', label: 'Generating' },
+  { key: 'review', label: 'Review' },
 ];
 
-const STEP_ORDER: WizardStep[] = ['welcome', 'consent', 'profile'];
+const STEP_ORDER: WizardStep[] = ['welcome', 'consent', 'profile', 'processing', 'review'];
 
 const STORAGE_KEY = 'onboarding-step';
 
@@ -59,6 +65,12 @@ export function OnboardingWizard() {
   const [direction, setDirection] = useState(1);
   const [consentComplete, setConsentComplete] = useState(false);
   const [profileComplete, setProfileComplete] = useState(false);
+  const [generationResult, setGenerationResult] = useState<GenerateProfileResponseDTO | null>(null);
+  // Collect profile data for the processing step
+  const [profileDataForGen, setProfileDataForGen] = useState<Record<string, string> | null>(null);
+  // Track which mode was chosen for the complete flow
+  const profileModeRef = useRef<'full' | 'general' | null>(null);
+
   // Persist step to sessionStorage when it changes
   useEffect(() => {
     try {
@@ -70,7 +82,7 @@ export function OnboardingWizard() {
 
   const stepIndex = STEP_ORDER.indexOf(currentStep);
 
-  const canGoBack = stepIndex > 0;
+  const canGoBack = stepIndex > 0 && currentStep !== 'processing';
   const canGoForward = useCallback(() => {
     if (currentStep === 'welcome') return true;
     if (currentStep === 'consent') return consentComplete;
@@ -93,7 +105,8 @@ export function OnboardingWizard() {
     setCurrentStep(STEP_ORDER[stepIndex - 1]);
   };
 
-  const handleComplete = async () => {
+  // ── Complete onboarding: save data to backend, then navigate to /chat ──
+  const handleComplete = useCallback(async () => {
     try {
       sessionStorage.removeItem(STORAGE_KEY);
     } catch {
@@ -137,19 +150,49 @@ export function OnboardingWizard() {
     useAuthStore.getState().completeOnboarding();
     useConsentStore.getState().setHasConsented(true);
     navigate('/chat');
-  };
+  }, [navigate]);
 
+  // ── Consent step complete ──────────────────────────────────────────────
   const handleConsentComplete = useCallback((complete: boolean) => {
     setConsentComplete(complete);
   }, []);
 
+  // ── Profile step complete (FullProfileForm) ────────────────────────────
   const handleProfileComplete = useCallback((complete: boolean) => {
     setProfileComplete(complete);
     if (complete) {
-      handleComplete();
+      profileModeRef.current = 'full';
+      // Build profile data for the generation step from the store
+      const stored = useProfileStore.getState().profile;
+      if (stored) {
+        setProfileDataForGen({
+          sex_at_birth: stored.genderIdentity?.includes('man') ? 'male' : stored.genderIdentity?.includes('woman') ? 'female' : 'Prefer not to say',
+          gender: stored.genderIdentity?.join(', ') || 'Not specified',
+          age_group: stored.ageRange ? stored.ageRange.replace(/_/g, '–') : 'Adult (18–64 years)',
+          primary_language: stored.primaryLanguage || 'English',
+          education_level: stored.educationLevel ? stored.educationLevel.replace(/_/g, ' ') : 'Some post-secondary education',
+          citizen_status: stored.immigrationStatus ? stored.immigrationStatus.replace(/_/g, ' ') : 'Canadian citizen / Permanent resident',
+          indigenous_status: stored.indigenousIdentity ? stored.indigenousIdentity.replace(/_/g, ' ') : 'Non-Indigenous',
+          disability_status: stored.disability?.join(', ') || 'No disclosed disability',
+        });
+      }
+      // Navigate to processing step
+      setDirection(1);
+      setCurrentStep('processing');
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── Generation complete (processing → review) ──────────────────────────
+  const handleGenerationComplete = useCallback((result: GenerateProfileResponseDTO) => {
+    setGenerationResult(result);
+    setDirection(1);
+    setCurrentStep('review');
+  }, []);
+
+  // ── Review complete → finish onboarding ────────────────────────────────
+  const handleReviewComplete = useCallback(() => {
+    handleComplete();
+  }, [handleComplete]);
 
   return (
     <div className="min-h-screen flex flex-col bg-background" suppressHydrationWarning>
@@ -236,44 +279,91 @@ export function OnboardingWizard() {
                 exit="exit"
                 transition={{ duration: 0.3, ease: 'easeInOut' }}
               >
-                <ProfileModeSelector onComplete={handleProfileComplete} />
+                <ProfileModeSelector
+                  onComplete={(complete) => {
+                    // Check which mode was chosen
+                    const consent = useConsentStore.getState();
+                    if (complete && consent.profileMode === 'general') {
+                      // General mode: skip processing/review, go straight to complete
+                      profileModeRef.current = 'general';
+                      handleComplete();
+                    } else if (complete) {
+                      // Full profile mode: trigger the profile handler
+                      handleProfileComplete(complete);
+                    }
+                  }}
+                />
+              </motion.div>
+            )}
+            {currentStep === 'processing' && profileDataForGen && (
+              <motion.div
+                key="processing"
+                custom={direction}
+                variants={slideVariants}
+                initial="enter"
+                animate="center"
+                exit="exit"
+                transition={{ duration: 0.3, ease: 'easeInOut' }}
+              >
+                <ProfileProcessingStep
+                  userProfile={profileDataForGen}
+                  onComplete={handleGenerationComplete}
+                />
+              </motion.div>
+            )}
+            {currentStep === 'review' && generationResult && (
+              <motion.div
+                key="review"
+                custom={direction}
+                variants={slideVariants}
+                initial="enter"
+                animate="center"
+                exit="exit"
+                transition={{ duration: 0.3, ease: 'easeInOut' }}
+              >
+                <ProfileReviewStep
+                  result={generationResult}
+                  onComplete={handleReviewComplete}
+                />
               </motion.div>
             )}
           </AnimatePresence>
         </div>
       </main>
 
-      {/* Navigation footer */}
-      <footer className="border-t bg-card mt-auto">
-        <div className="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between">
-          <Button
-            variant="ghost"
-            onClick={goBack}
-            disabled={!canGoBack}
-            className="gap-1"
-            aria-label="Go back"
-          >
-            <ChevronLeft className="w-4 h-4" />
-            Back
-          </Button>
-
-          {currentStep === 'profile' ? null : (
+      {/* Navigation footer — hidden during processing and review */}
+      {currentStep !== 'processing' && currentStep !== 'review' && (
+        <footer className="border-t bg-card mt-auto">
+          <div className="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between">
             <Button
-              onClick={goNext}
-              disabled={!canGoForward()}
+              variant="ghost"
+              onClick={goBack}
+              disabled={!canGoBack}
               className="gap-1"
-              aria-label={
-                currentStep === 'welcome'
-                  ? 'Continue to privacy settings'
-                  : 'Continue to profile'
-              }
+              aria-label="Go back"
             >
-              Continue
-              <ChevronRight className="w-4 h-4" />
+              <ChevronLeft className="w-4 h-4" />
+              Back
             </Button>
-          )}
-        </div>
-      </footer>
+
+            {currentStep === 'profile' ? null : (
+              <Button
+                onClick={goNext}
+                disabled={!canGoForward()}
+                className="gap-1"
+                aria-label={
+                  currentStep === 'welcome'
+                    ? 'Continue to privacy settings'
+                    : 'Continue to profile'
+                }
+              >
+                Continue
+                <ChevronRight className="w-4 h-4" />
+              </Button>
+            )}
+          </div>
+        </footer>
+      )}
     </div>
   );
 }

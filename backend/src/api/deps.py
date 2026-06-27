@@ -14,20 +14,19 @@ Low-memory strategy:
 Available dependencies:
     - ``get_settings`` — cached Settings singleton (from src.core.config)
     - ``get_rag_chain`` — lazy-loaded RAGChain singleton
-    - ``get_db`` — yields a MongoDB database instance (TODO)
+    - ``get_profile_generator`` — lazy-loaded ProfileGeneratorService singleton
 """
 
-from functools import lru_cache
-from fastapi import Request
 from src.core.config import Settings, get_settings
 
 # Re-export for convenience
-__all__ = ["get_settings", "get_rag_chain", "get_db"]
+__all__ = ["get_settings", "get_rag_chain", "get_profile_generator"]
 
 
 # Sentinel object to detect "not yet loaded"
 _UNSET = object()
 _rag_chain = _UNSET  # type: ignore
+_profile_generator = _UNSET  # type: ignore
 
 
 async def get_rag_chain():
@@ -60,31 +59,32 @@ async def get_rag_chain():
     return _rag_chain
 
 
-async def get_db():
+async def get_profile_generator():
     """
-    Dependency that provides a MongoDB database instance.
+    Dependency that provides a lazily-loaded, cached ProfileGeneratorService.
 
-    The connection is created once and reused via a connection pool
-    (``maxPoolSize=2`` keeps memory low).
+    The service wraps ``ProfileAugmenter`` which loads the profiles vector
+    store (``vectordb_profiles/``) and its embedding model on first use.
 
     Usage:
-        async def my_handler(db = Depends(get_db)):
-            collection = db["users"]
-            ...
+        async def my_handler(gen = Depends(get_profile_generator)):
+            prompt = gen.generate_prompt(user_profile={...}, user_query=...)
 
-    TODO:
-        - Create a single ``MongoClient`` in the lifespan handler.
-        - Store it in ``app.state``.
-        - Retrieve it here with ``request.app.state.db``.
+    Returns
+    -------
+    ProfileGeneratorService
+        The singleton profile generator service.
     """
-    # from motor.motor_asyncio import AsyncIOMotorClient
-    # client = AsyncIOMotorClient(settings.mongo_uri, maxPoolSize=2)
-    # db = client[settings.mongo_db]
-    # return db
-    raise NotImplementedError(
-        "TODO: initialise MongoDB in lifespan handler and pass "
-        "the database instance through app.state."
-    )
+    global _profile_generator
+
+    if _profile_generator is _UNSET:
+        from src.api.services.profile_generator_service import (
+            ProfileGeneratorService,
+        )
+
+        _profile_generator = ProfileGeneratorService()
+
+    return _profile_generator
 
 
 # Re-export the cached settings getter from config

@@ -24,6 +24,8 @@ const AdminDashboardPage = lazy(() => import('@/app/admin/page'));
 const SourcesLibraryPage = lazy(() => import('@/app/admin/sources/page'));
 const AddSourcePage = lazy(() => import('@/app/admin/sources/new/page'));
 const SourceDetailPage = lazy(() => import('@/app/admin/sources/[id]/page'));
+const AdminUsersPage = lazy(() => import('@/app/admin/users/page'));
+const AdminUserDetailPage = lazy(() => import('@/app/admin/users/[userId]/page'));
 
 function PageLoader() {
   return (
@@ -61,6 +63,8 @@ export default function App() {
                 <Route path="/admin/sources" element={<SourcesLibraryPage />} />
                 <Route path="/admin/sources/new" element={<AddSourcePage />} />
                 <Route path="/admin/sources/:id" element={<SourceDetailPage />} />
+                <Route path="/admin/users" element={<AdminUsersPage />} />
+                <Route path="/admin/users/:userId" element={<AdminUserDetailPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </Suspense>

@@ -9,34 +9,12 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
 import type { SourceType } from '@/types/source';
 import type { ExtractedMetadata } from '@/lib/utils/metadataExtractor';
-import { isValidYouTubeUrl, getYouTubeVideoId, getYouTubeThumbnail } from '@/lib/utils/metadataExtractor';
+import { isValidYouTubeUrl, getYouTubeVideoId, getYouTubeThumbnail, extractMetadataFromUrl } from '@/lib/utils/metadataExtractor';
 
 interface UrlInputCardProps {
   sourceType: SourceType;
   onMetadataFetched: (url: string, metadata: ExtractedMetadata) => void;
 }
-
-const mockWebpageMetadata: ExtractedMetadata = {
-  title: 'Privacy-First AI: Design Principles for the Next Generation',
-  authors: ['Elena Rodriguez', 'Anika Patel'],
-  publicationDate: '2025-04-10',
-  publisher: 'Digital Rights Foundation',
-  description:
-    'Exploring design principles for building AI systems that prioritize user privacy and data protection from the ground up.',
-  thumbnailUrl: null,
-  language: 'en',
-};
-
-const mockYouTubeMetadata: ExtractedMetadata = {
-  title: 'AI Ethics: Building Trustworthy Systems — Full Talk',
-  authors: ['AI Conference'],
-  publicationDate: '2025-03-15',
-  publisher: 'YouTube',
-  description:
-    'A comprehensive talk on building trustworthy AI systems, covering fairness, accountability, and transparency.',
-  thumbnailUrl: null,
-  language: 'en',
-};
 
 export function UrlInputCard({ sourceType, onMetadataFetched }: UrlInputCardProps) {
   const [url, setUrl] = useState('');
@@ -74,22 +52,10 @@ export function UrlInputCard({ sourceType, onMetadataFetched }: UrlInputCardProp
     setLoading(true);
     setFetchFailed(false);
 
-    // Simulate API call with setTimeout
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-
     try {
-      const mockData = isYouTube ? mockYouTubeMetadata : mockWebpageMetadata;
-
-      // For YouTube, set thumbnail
-      if (isYouTube) {
-        const videoId = getYouTubeVideoId(url);
-        if (videoId) {
-          mockData.thumbnailUrl = getYouTubeThumbnail(videoId);
-        }
-      }
-
-      setMetadata({ ...mockData });
-      onMetadataFetched(url, { ...mockData });
+      const data = await extractMetadataFromUrl(url);
+      setMetadata(data);
+      onMetadataFetched(url, data);
     } catch {
       setFetchFailed(true);
       setMetadata(null);

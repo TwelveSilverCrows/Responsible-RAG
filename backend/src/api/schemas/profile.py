@@ -125,3 +125,77 @@ class ConsentResponse(BaseModel):
     has_consented: bool = Field(False, description="True if consent flow was completed.")
     consented_at: Optional[str] = Field(None)
     updated_at: Optional[str] = Field(None)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Profile Generation (personalised prompt builder)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class GenerateProfileRequest(BaseModel):
+    """Generate a personalised system prompt from demographic data."""
+
+    user_profile: Optional[dict[str, str]] = Field(
+        None,
+        description=(
+            "Demographic profile fields. Keys matching the standard profile "
+            "schema (see ``src.core.profiles._STANDARD_PROFILE``) will be "
+            "used; missing fields fall back to defaults. Example keys: "
+            "sex_at_birth, gender, age_group, primary_language, "
+            "education_level, citizen_status, indigenous_status, "
+            "disability_status."
+        ),
+        example={
+            "gender": "non_binary",
+            "age_group": "teen",
+            "primary_language": "English",
+            "education_level": "high school",
+            "citizen_status": "Canadian citizen",
+            "indigenous_status": "First Nations",
+            "disability_status": "cognitive disability",
+        },
+    )
+    user_query: str = Field(
+        ..., min_length=1, max_length=4096,
+        description="The user's question that the prompt will be built around.",
+        example="What health services are available to me in Canada?",
+    )
+    retrieved_documents: Optional[str] = Field(
+        None,
+        description=(
+            "Pre-formatted context from the main RAG retriever. If omitted, "
+            "a placeholder note is inserted indicating no documents were used."
+        ),
+    )
+
+
+class GenerateProfileResponse(BaseModel):
+    """Result of a personalised profile generation."""
+
+    prompt: str = Field(
+        ..., description="Fully rendered DYNAMIC_PROFILE_TEMPLATE prompt string.",
+    )
+    prompt_length: int = Field(
+        ..., description="Character count of the generated prompt.",
+    )
+    fields_provided: int = Field(
+        ..., description="Number of non-default demographic fields provided.",
+    )
+    sources_used: list[str] = Field(
+        default_factory=list,
+        description="Titles of the source documents used to generate adaptation rules.",
+    )
+    adaptation_fields: list[dict[str, str]] = Field(
+        default_factory=list,
+        description=(
+            "Each personalisation dimension with field name, label, value, "
+            "and whether research-backed evidence was found."
+        ),
+        example=[
+            {
+                "field": "age_group",
+                "label": "Age Group",
+                "value": "teen",
+                "evidence_found": True,
+            },
+        ],
+    )

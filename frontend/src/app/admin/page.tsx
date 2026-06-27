@@ -13,6 +13,9 @@ import {
   Globe,
   Youtube,
   ArrowRight,
+  UserCheck,
+  User,
+  MessageSquare,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -35,6 +38,7 @@ const typeIcons: Record<string, React.ElementType> = {
 
 export default function AdminDashboardPage() {
   const [stats, setStats] = useState<StatsResponseDTO | null>(null);
+  const [userStats, setUserStats] = useState<{ total_users: number; total_conversations: number; users_with_profiles: number; research_data_consent: number } | null>(null);
   const [recentSources, setRecentSources] = useState<SourceResponseDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -44,12 +48,14 @@ export default function AdminDashboardPage() {
       setLoading(true);
       setError(null);
       try {
-        const [statsData, sourcesData] = await Promise.all([
+        const [statsData, sourcesData, userStatsData] = await Promise.all([
           api.sources.stats(),
           api.sources.list(1, 5),
+          api.users.stats(),
         ]);
         setStats(statsData);
         setRecentSources(sourcesData.sources);
+        setUserStats(userStatsData);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load dashboard');
       } finally {
@@ -197,6 +203,74 @@ export default function AdminDashboardPage() {
                 </CardContent>
               </Card>
             </div>
+
+            {/* User stats */}
+            {userStats && (
+              <>
+                <div>
+                  <h2 className="text-lg font-semibold font-display mb-3">Users</h2>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardDescription className="flex items-center gap-2">
+                          <UserCheck className="w-4 h-4" />
+                          Total Users
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <p className="text-3xl font-bold">{userStats.total_users}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {userStats.users_with_profiles} with profiles
+                        </p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardDescription className="flex items-center gap-2">
+                          <MessageSquare className="w-4 h-4" />
+                          Conversations
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <p className="text-3xl font-bold">{userStats.total_conversations}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Across all users
+                        </p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardDescription className="flex items-center gap-2">
+                          <User className="w-4 h-4" />
+                          Research Consent
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <p className="text-3xl font-bold">{userStats.research_data_consent}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Users shared data
+                        </p>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <CardDescription className="flex items-center gap-2">
+                          <ArrowRight className="w-4 h-4" />
+                          Manage
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <Button variant="outline" size="sm" asChild className="w-full">
+                          <Link to="/admin/users">
+                            View all users
+                          </Link>
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  </div>
+                </div>
+              </>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {/* Recent additions */}

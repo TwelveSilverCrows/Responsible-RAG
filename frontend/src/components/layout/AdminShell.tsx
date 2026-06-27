@@ -29,6 +29,7 @@ import { useTheme } from '@/lib/themeProvider';
 
 const adminNavItems = [
   { href: '/admin', label: 'Dashboard', icon: LayoutDashboard, exact: true },
+  { href: '/admin/users', label: 'Users', icon: User },
   { href: '/admin/sources', label: 'Sources', icon: Database },
 ];
 

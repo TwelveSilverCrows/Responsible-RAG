@@ -7,7 +7,41 @@
 # Logs:    docker compose logs -f <service>
 # =============================================================================
 
+# ── Named volumes for services that don't use host bind mounts ──────────────
+volumes:
+  vectordb:
+  caddy_data:
+  caddy_config:
+
 services:
+
+  # ---------------------------------------------------------------------------
+  # MongoDB — Off-the-shelf, data persisted on the host
+  # ---------------------------------------------------------------------------
+  mongo:
+    image: mongo:7
+    container_name: rag-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-rag}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-ragpassword}
+      MONGO_INITDB_DATABASE: ${MONGO_DB:-responsible_rag}
+      # App user credentials (used by init.js to create a limited-privilege user)
+      MONGO_APP_USER: ${MONGO_APP_USER:-rag}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:-ragpassword}
+    volumes:
+      # Host-backed persistence: data survives container restarts & rebuilds
+      - ./data/mongo:/data/db
+      # Init script creates the app user + database on first run
+      - ./data/mongo/init.js:/docker-entrypoint-initdb.d/init.js:ro
+    healthcheck:
+      test: mongosh --quiet --eval "db.adminCommand('ping')"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   # ---------------------------------------------------------------------------
   # Frontend (Vite + React via nginx)
@@ -18,14 +52,17 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID:-}
-        # Default uses relative path (works behind Caddy). For local dev without
-        # Docker, set VITE_API_URL=http://localhost:8000/api/v1 in .env.
-        VITE_API_URL: ${VITE_API_URL:-/api/v1}
+        # Relative path — the frontend nginx proxies /api/v1/ to backend:8000.
+        # Override only if you need an external backend URL.
+        VITE_API_URL: /api/v1
     image: rag-frontend:latest
     container_name: rag-frontend
     ports:
       - "3000:80"
     restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
 
   # ---------------------------------------------------------------------------
   # Backend (FastAPI)
@@ -43,10 +80,18 @@ services:
     environment:
       # Docker frontend serves on port 3000 (dev) or behind Caddy (prod)
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      # Point to the local Docker MongoDB service
+      # authSource=responsible_rag matches the database where init.js
+      # creates the app user.
+      MONGO_URI: ${MONGO_URI:-mongodb://rag:ragpassword@mongo:27017/responsible_rag?authSource=responsible_rag}
     volumes:
       - ./resources:/app/resources:ro
       - ./vectordb:/app/vectordb
+      - ./vectordb_profiles:/app/vectordb_profiles:ro
     restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8000/api/v1/health"]
       interval: 30s
@@ -70,11 +115,6 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-
-# =============================================================================
-# Volumes
-# =============================================================================
-volumes:
-  vectordb:
-  caddy_data:
-  caddy_config:
+    depends_on:
+      - frontend
+      - backend

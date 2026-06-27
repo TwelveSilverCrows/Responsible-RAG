@@ -45,6 +45,9 @@ htmlcov/
 *.swo
 .DS_Store
 
+# ── MongoDB data (host-persisted, auto-generated) ────────────────────────────
+data/mongo/
+
 # ── Frontend (Bun/Node / Vite) ───────────────────────────────────────────────
 frontend/node_modules/
 frontend/.next/

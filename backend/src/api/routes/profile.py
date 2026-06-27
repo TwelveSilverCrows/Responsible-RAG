@@ -3,9 +3,17 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from src.api.schemas.profile import ProfileUpdateRequest, ConsentUpdateRequest
+from src.api.schemas.profile import (
+    ProfileUpdateRequest,
+    ConsentUpdateRequest,
+    GenerateProfileRequest,
+    GenerateProfileResponse,
+)
 from src.api.middleware import get_current_user
 from src.api.db.database import get_users_collection
+from src.api.deps import get_profile_generator
+from src.api.services.profile_generator_service import ProfileGeneratorService
+from src.core.profiles import _STANDARD_PROFILE
 
 router = APIRouter()
 
@@ -88,6 +96,69 @@ async def update_profile(
 
     doc = profiles.find_one({"user_id": current_user["sub"]})
     return _profile_to_response(doc)
+
+
+# ── Profile Generation (personalised prompt) ──────────────────────────────────
+
+@router.post("/generate", response_model=GenerateProfileResponse)
+async def generate_profile(
+    body: GenerateProfileRequest,
+    generator: ProfileGeneratorService = Depends(get_profile_generator),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Generate a personalised system prompt from demographic profile data.
+
+    Uses the profiles knowledge base (``vectordb_profiles/``) to retrieve
+    evidence-based communication rules for each demographic field, then
+    renders the full ``DYNAMIC_PROFILE_TEMPLATE``.
+
+    Fields that match the standard defaults (or are omitted) skip the
+    vector-store lookup to minimise latency and memory usage.
+    """
+    prompt = generator.generate_prompt(
+        user_profile=body.user_profile,
+        user_query=body.user_query,
+        retrieved_documents=body.retrieved_documents or "",
+    )
+
+    # Count how many non-default fields were provided
+    profile_map = body.user_profile or {}
+    fields_provided = sum(
+        1 for k, v in profile_map.items()
+        if v and str(v).strip() and v != _STANDARD_PROFILE.get(k, "")
+    )
+
+    # Build adaptation fields for each demographic dimension
+    _FIELD_LABELS: dict[str, str] = {
+        "sex_at_birth": "Sex at Birth",
+        "gender": "Gender Identity",
+        "age_group": "Age Group",
+        "primary_language": "Primary Language",
+        "education_level": "Education Level",
+        "citizen_status": "Citizen Status",
+        "indigenous_status": "Indigenous Status",
+        "disability_status": "Disability Status",
+    }
+    adaptation_fields: list[dict[str, str]] = []
+    for field_key, label in _FIELD_LABELS.items():
+        value = profile_map.get(field_key, "")
+        is_default = not value or str(value).strip() == ""
+        evidence = str(value).strip() != "" and value != _STANDARD_PROFILE.get(field_key, "")
+        adaptation_fields.append({
+            "field": field_key,
+            "label": label,
+            "value": str(value).strip() if value else _STANDARD_PROFILE.get(field_key, ""),
+            "evidence_found": str(evidence).lower(),
+        })
+
+    return GenerateProfileResponse(
+        prompt=prompt,
+        prompt_length=len(prompt),
+        fields_provided=fields_provided,
+        sources_used=generator.last_source_titles,
+        adaptation_fields=adaptation_fields,
+    )
 
 
 # ── Consent ───────────────────────────────────────────────────────────────────

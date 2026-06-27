@@ -45,8 +45,26 @@ server {
     listen       80;
     server_name  localhost;
 
+    client_max_body_size 500M;
+
     root   /usr/share/nginx/html;
     index  index.html;
+
+    # ── API proxy: forward /api/v1/* to the backend ──────────────────────
+    # When running behind Caddy this rule is redundant (Caddy handles it),
+    # but it allows the frontend container to work standalone.
+    location /api/v1/ {
+        client_max_body_size 500M;
+        proxy_pass http://backend:8000/api/v1/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+    }
 
     # SPA fallback — serve index.html for all non-file routes
     location / {

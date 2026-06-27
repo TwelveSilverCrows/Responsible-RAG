@@ -21,8 +21,9 @@ import logging
 import os
 from pathlib import Path
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 
 from src.api.schemas.source import (
     SourceResponse,
@@ -34,9 +35,12 @@ from src.api.schemas.source import (
     YouTubeUploadRequest,
 )
 from src.api.middleware import require_admin
-from src.api.db.models import User
 from src.api.services.source_service import SourceService
 from src.core.config import get_settings
+
+# Dedicated thread pool for CPU-bound background ingest tasks so they
+# never block the asyncio event loop.
+_background_executor = ThreadPoolExecutor(max_workers=2)
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +73,7 @@ def _meta_to_response(meta: dict) -> SourceResponse:
 def list_sources(
     page: int = 1,
     limit: int = 20,
-    admin: User = Depends(require_admin),
+    admin: dict = Depends(require_admin),
 ):
     """List all knowledge-base sources (from TurboVec metadata)."""
     service = SourceService()
@@ -88,7 +92,7 @@ def list_sources(
 @router.get("/{source_id}", response_model=SourceResponse)
 def get_source(
     source_id: str,
-    admin: User = Depends(require_admin),
+    admin: dict = Depends(require_admin),
 ):
     """Get detailed metadata for a single source."""
     service = SourceService()
@@ -101,7 +105,7 @@ def get_source(
 @router.post("", response_model=SourceResponse, status_code=201)
 def create_source(
     body: SourceCreateRequest,
-    admin: User = Depends(require_admin),
+    admin: dict = Depends(require_admin),
 ):
     """Create a new source with metadata (synchronous, status='indexed')."""
     service = SourceService()
@@ -110,23 +114,53 @@ def create_source(
 
 
 @router.put("/{source_id}", response_model=SourceResponse)
-def update_source(
+async def update_source(
     source_id: str,
     body: SourceUpdateRequest,
-    admin: User = Depends(require_admin),
+    admin: dict = Depends(require_admin),
 ):
-    """Update source metadata on all chunks in TurboVec."""
+    """Update source metadata and trigger background processing if a pending file exists."""
     service = SourceService()
     meta = service.update_source(source_id, body.model_dump(exclude_none=True))
     if meta is None:
         raise HTTPException(status_code=404, detail="Source not found")
+
+    # If the placeholder has a pending file, start background processing now
+    # (same strategy as YouTube — metadata is ready, so kick off ingestion).
+    pending_path = meta.get("pending_file_path")
+    if pending_path:
+        path = Path(pending_path)
+        if path.exists():
+            file_content = path.read_bytes()
+            orig_filename = meta.get("pending_filename", path.name)
+            path.unlink(missing_ok=True)
+
+            # Clear the pending flag so processing isn't triggered again
+            service._get_kb().update_source_metadata(source_id, {
+                "pending_file_path": "",
+                "pending_filename": "",
+            })
+
+            loop = asyncio.get_event_loop()
+            # Pass the full metadata snapshot to avoid a race with the
+            # background thread reading stale data from TurboVec.
+            loop.run_in_executor(
+                _background_executor,
+                _process_upload,
+                source_id,
+                file_content,
+                orig_filename,
+                meta.get("title", orig_filename),
+                meta,  # full metadata snapshot
+            )
+
     return _meta_to_response(meta)
 
 
 @router.delete("/{source_id}")
 def delete_source(
     source_id: str,
-    admin: User = Depends(require_admin),
+    admin: dict = Depends(require_admin),
 ):
     """Delete a source and all its chunks from TurboVec."""
     service = SourceService()
@@ -143,6 +177,7 @@ def _process_upload(
     file_content: bytes,
     filename: str,
     title: str,
+    source_meta: Optional[dict] = None,
 ) -> None:
     """
     Background task: save to temp → process (load/transcribe + chunk)
@@ -150,6 +185,13 @@ def _process_upload(
 
     Uses ``SourceService.process_file`` for all file types (text, PDF, audio).
     Runs outside the request-response cycle.
+
+    Parameters
+    ----------
+    source_meta:
+        Optional full metadata snapshot captured at call time so the
+        background thread does not need to re-read from TurboVec
+        (avoids races with concurrent PUT metadata updates).
     """
     service = SourceService()
     try:
@@ -166,7 +208,7 @@ def _process_upload(
             service.fail_source(source_id, "Processing returned no chunks")
             return
 
-        service.finalize_source(source_id, chunks)
+        service.finalize_source(source_id, chunks, override_meta=source_meta)
         logger.info("Background ingest complete for source %s (%d chunks)", source_id, len(chunks))
 
     except Exception as exc:
@@ -203,8 +245,7 @@ def _process_youtube_upload(
 async def upload_source(
     file: UploadFile = File(...),
     title: Optional[str] = None,
-    background_tasks: BackgroundTasks = BackgroundTasks(),
-    admin: User = Depends(require_admin),
+    admin: dict = Depends(require_admin),
 ):
     """
     Upload a file → background ingestion.
@@ -226,7 +267,13 @@ async def upload_source(
                    f"Supported: {', '.join(sorted(SourceService._SUPPORTED_SUFFIXES))}",
         )
 
-    content = await file.read()
+    # File size limits per type
+    _SIZE_LIMITS = {
+        "pdf":   100 * 1024 * 1024,   # 100 MB
+        "audio": 500 * 1024 * 1024,   # 500 MB
+        "text":   15 * 1024 * 1024,   #  15 MB
+    }
+
     suffix = Path(file.filename).suffix.lower()
     if suffix == ".pdf":
         source_type = "pdf"
@@ -235,20 +282,35 @@ async def upload_source(
     else:
         source_type = "text"
 
-    # Create placeholder (status="processing")
+    limit = _SIZE_LIMITS.get(source_type, 50 * 1024 * 1024)
+    if file.size is not None and file.size > limit:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size for {source_type.upper()} files is {limit // (1024 * 1024)}MB.",
+        )
+
+    content = await file.read()
+    if len(content) > limit:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size for {source_type.upper()} files is {limit // (1024 * 1024)}MB.",
+        )
+
+    # Save file to a temporary location and create a placeholder.
+    # Processing is NOT started here — it will be triggered when the
+    # user submits metadata via PUT /{id} (same strategy as YouTube).
+    settings = get_settings()
+    tmp_dir = Path(settings.upload_dir)
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tmp_path = tmp_dir / f"pending_{os.urandom(8).hex()}_{file.filename}"
+    tmp_path.write_bytes(content)
+
     meta = service.create_placeholder({
         "title": title or file.filename,
         "source_type": source_type,
+        "pending_file_path": str(tmp_path),
+        "pending_filename": file.filename,
     })
-
-    # Schedule background processing
-    background_tasks.add_task(
-        _process_upload,
-        source_id=meta["source_id"],
-        file_content=content,
-        filename=file.filename,
-        title=title or file.filename,
-    )
 
     return UploadResponse(
         id=meta["source_id"],
@@ -287,8 +349,7 @@ def _process_webpage_upload(
 @router.post("/webpage", response_model=UploadResponse, status_code=202)
 async def upload_webpage(
     body: URLUploadRequest,
-    background_tasks: BackgroundTasks = BackgroundTasks(),
-    admin: User = Depends(require_admin),
+    admin: dict = Depends(require_admin),
 ):
     """
     Submit a webpage URL → background scraping & ingestion.
@@ -312,11 +373,13 @@ async def upload_webpage(
         "internal_notes": body.internal_notes,
     })
 
-    background_tasks.add_task(
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(
+        _background_executor,
         _process_webpage_upload,
-        source_id=meta["source_id"],
-        url=body.url,
-        title=body.title,
+        meta["source_id"],
+        body.url,
+        body.title,
     )
 
     return UploadResponse(
@@ -331,8 +394,7 @@ async def upload_webpage(
 @router.post("/youtube", response_model=UploadResponse, status_code=202)
 async def upload_youtube(
     body: YouTubeUploadRequest,
-    background_tasks: BackgroundTasks = BackgroundTasks(),
-    admin: User = Depends(require_admin),
+    admin: dict = Depends(require_admin),
 ):
     """
     Submit a YouTube URL → background transcription & ingestion.
@@ -357,12 +419,14 @@ async def upload_youtube(
         "internal_notes": body.internal_notes,
     })
 
-    # Schedule background YouTube processing
-    background_tasks.add_task(
+    # Schedule background YouTube processing in thread pool
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(
+        _background_executor,
         _process_youtube_upload,
-        source_id=meta["source_id"],
-        url=body.url,
-        title=body.title,
+        meta["source_id"],
+        body.url,
+        body.title,
     )
 
     return UploadResponse(

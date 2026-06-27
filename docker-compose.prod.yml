@@ -10,7 +10,9 @@ services:
   frontend:
     build:
       args:
-        VITE_API_URL: https://${DOMAIN}/api/v1
+        # In production, Caddy serves as the reverse proxy, so the relative
+        # path /api/v1 is sufficient (same origin).
+        VITE_API_URL: /api/v1
 
   backend:
     environment:

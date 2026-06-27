@@ -8,13 +8,12 @@ Endpoints:
 from fastapi import APIRouter, Depends
 from src.api.schemas.common import StatsResponse
 from src.api.middleware import require_admin
-from src.api.db.models import User
 
 router = APIRouter()
 
 
 @router.get("/stats", response_model=StatsResponse)
-def get_dashboard_stats(admin: User = Depends(require_admin)):
+def get_dashboard_stats(admin: dict = Depends(require_admin)):
     """
     Get aggregate statistics for the admin dashboard.
 

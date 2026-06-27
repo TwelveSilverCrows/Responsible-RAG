@@ -93,9 +93,13 @@ async def verify_email(token: str):
 async def login(body: UserLogin):
     settings = get_settings()
 
-    # Admin check first
-    if body.email == settings.admin_email and body.password == settings.admin_password:
-        token = create_token({"sub": "admin", "role": "admin"}, expires_delta=60 * 8)
+    # Admin check first — accept both full email and short "admin" username
+    admin_match = (
+        body.password == settings.admin_password and
+        (body.email == settings.admin_email or body.email.lower() == "admin")
+    )
+    if admin_match:
+        token = create_token({"sub": "admin", "role": "admin"}, expires_delta=60 * 60)
         return {"access_token": token, "token_type": "bearer"}
 
     users = get_users_collection()
@@ -211,9 +215,13 @@ async def google_callback(code: str):
 @router.post("/admin/login", response_model=TokenResponse)
 async def admin_login(body: UserLogin):
     settings = get_settings()
-    if body.email != settings.admin_email or body.password != settings.admin_password:
+    admin_match = (
+        body.password == settings.admin_password and
+        (body.email == settings.admin_email or body.email.lower() == "admin")
+    )
+    if not admin_match:
         raise HTTPException(401, "Invalid admin credentials")
-    token = create_token({"sub": "admin", "role": "admin"}, expires_delta=60 * 8)
+    token = create_token({"sub": "admin", "role": "admin"}, expires_delta=60 * 60)
     return {"access_token": token, "token_type": "bearer"}
 
 # ── Complete onboarding ───────────────────────────────────────────────────────

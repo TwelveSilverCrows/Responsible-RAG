@@ -7,14 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from bson.objectid import ObjectId
 
 from src.api.schemas.chat import (
-    ChatRequest, ChatResponse, CitationSchema,
-    ConversationListItem, ConversationListResponse, ConversationResponse,
-    MessageResponse, CreateConversationRequest, RenameConversationRequest,
+    ChatRequest, ChatResponse, CitationSchema, CreateConversationRequest, RenameConversationRequest,
 )
 from src.api.middleware import get_current_user
-from src.api.deps import get_rag_chain
-from src.api.db.database import get_users_collection
-from src.core.profiles import RAGPopulation
+from src.api.deps import get_rag_chain, get_profile_generator
+from src.api.services.profile_generator_service import ProfileGeneratorService
 from src.core.rag_chain import RAGChain
 
 router = APIRouter()
@@ -197,12 +194,13 @@ async def get_messages(
 async def chat(
     body: ChatRequest,
     chain: RAGChain = Depends(get_rag_chain),
+    generator: ProfileGeneratorService = Depends(get_profile_generator),
     current_user: dict = Depends(get_current_user),
 ):
     db = _get_db()
 
-    # Resolve profile
-    group_prompt = _resolve_profile(body.profile_key)
+    # Build personalised profile prompt from stored user profile
+    group_prompt = _build_profile_prompt(db, generator, current_user, body.question)
 
     # Get or create conversation
     conv_id = body.conversation_id
@@ -290,30 +288,117 @@ async def chat(
     )
 
 
-# ── Profile resolver ──────────────────────────────────────────────────────────
+# ── Profile prompt builder ───────────────────────────────────────────────────
 
-_PROFILE_KEY_MAP: dict[str, str] = {
-    "general": "GENERAL",
-    "senior": "SENIOR_LOW_EDU_CANADA",
-    "lgbt_teen": "LGBT_CANADIAN_TEEN",
-    "lgbt": "LGBT_CANADIAN_TEEN",
-    "indigenous": "INDIGENOUS_COMMUNITY_LEADER_CA",
-    "disabled": "MIDAGED_DISABLED_CANADIAN",
-    "full": "SENIOR_LOW_EDU_CANADA",
+_DEFAULT_SYSTEM_PROMPT = (
+    "You are a helpful, polite AI assistant. Answer the user's question "
+    "concisely and clearly. Be respectful and direct."
+)
+
+
+_AGE_MAP: dict[str, str] = {
+    "under_18": "Youth (under 18)",
+    "18_30": "Young adult (18–30 years)",
+    "31_50": "Adult (31–50 years)",
+    "51_65": "Middle-aged adult (51–65 years)",
+    "65_plus": "Senior (65+ years)",
+    "prefer_not_to_say": "Adult",
+}
+
+_EDU_MAP: dict[str, str] = {
+    "no_formal": "No formal education",
+    "high_school": "High school diploma",
+    "some_college": "Some post-secondary education",
+    "bachelors": "Bachelor's degree",
+    "masters": "Master's degree",
+    "doctoral": "Doctoral degree",
+}
+
+_IMM_MAP: dict[str, str] = {
+    "citizen": "Canadian citizen",
+    "permanent_resident": "Permanent resident",
+    "temporary_resident": "Temporary resident / Visa holder",
+    "refugee": "Refugee / Protected person",
+    "undocumented": "Undocumented / No legal status",
+}
+
+_INDIG_MAP: dict[str, str] = {
+    "first_nations": "First Nations",
+    "metis": "Métis",
+    "inuit": "Inuit",
+    "non_indigenous": "Non-Indigenous",
 }
 
 
-def _resolve_profile(profile_key: str | None) -> str:
-    if not profile_key:
-        return RAGPopulation.GENERAL.value
-    key = profile_key.strip().lower()
-    member_name = _PROFILE_KEY_MAP.get(key)
-    if not member_name:
-        return RAGPopulation.GENERAL.value
-    try:
-        return RAGPopulation[member_name].value
-    except KeyError:
-        return RAGPopulation.GENERAL.value
+def _map_profile_to_generation(profile_doc: dict) -> dict[str, str]:
+    """Map stored profile fields to the format expected by ProfileAugmenter."""
+    mapped: dict[str, str] = {}
+
+    age = profile_doc.get("age_range")
+    if age and age in _AGE_MAP:
+        mapped["age_group"] = _AGE_MAP[age]
+
+    gender_ids = profile_doc.get("gender_identity", [])
+    if gender_ids:
+        mapped["gender"] = ", ".join(
+            g.replace("_", " ").title() for g in gender_ids if g
+        )
+
+    lang = profile_doc.get("primary_language")
+    if lang:
+        mapped["primary_language"] = lang
+
+    edu = profile_doc.get("education_level")
+    if edu and edu in _EDU_MAP:
+        mapped["education_level"] = _EDU_MAP[edu]
+
+    imm = profile_doc.get("immigration_status")
+    if imm and imm in _IMM_MAP:
+        mapped["citizen_status"] = _IMM_MAP[imm]
+
+    indig = profile_doc.get("indigenous_identity")
+    if indig and indig in _INDIG_MAP:
+        mapped["indigenous_status"] = _INDIG_MAP[indig]
+
+    disabilities = profile_doc.get("disability", [])
+    if disabilities and "none" not in disabilities:
+        mapped["disability_status"] = ", ".join(
+            d.replace("_", " ").title() for d in disabilities
+        )
+    elif disabilities and "none" in disabilities:
+        mapped["disability_status"] = "No disclosed disability"
+
+    return mapped
+
+
+def _build_profile_prompt(
+    db, generator: ProfileGeneratorService, current_user: dict, query: str,
+) -> str:
+    """
+    Build a personalised system prompt from the user's stored demographic profile.
+
+    Falls back to a simple default when no profile exists or the user
+    has opted for 'general' privacy mode.
+    """
+    if db is None:
+        return _DEFAULT_SYSTEM_PROMPT
+
+    profile_doc = db["profiles"].find_one({"user_id": current_user["sub"]})
+    if not profile_doc:
+        return _DEFAULT_SYSTEM_PROMPT
+
+    # If the user chose 'general' privacy mode, don't personalise
+    if profile_doc.get("profile_mode") == "general":
+        return _DEFAULT_SYSTEM_PROMPT
+
+    user_profile = _map_profile_to_generation(profile_doc)
+    if not user_profile:
+        return _DEFAULT_SYSTEM_PROMPT
+
+    return generator.generate_prompt(
+        user_profile=user_profile,
+        user_query=query,
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -331,27 +416,3 @@ _PROFILE_KEY_MAP: dict[str, str] = {
     "full": "SENIOR_LOW_EDU_CANADA",       # fallback for "full" privacy mode
 }
 
-
-def _resolve_profile(profile_key: str | None) -> str:
-    """
-    Convert a short UI profile key (e.g. ``"senior"``) into the full
-    RAGPopulation prompt text.
-
-    Defaults to the GENERAL profile when no key is provided or the key
-    is unknown — no login required.
-    """
-    if not profile_key:
-        return RAGPopulation.GENERAL.value
-
-    # Normalise: lowercase, strip whitespace
-    key = profile_key.strip().lower()
-
-    # Look up the enum member name
-    member_name = _PROFILE_KEY_MAP.get(key)
-    if not member_name:
-        return RAGPopulation.GENERAL.value
-
-    try:
-        return RAGPopulation[member_name].value
-    except KeyError:
-        return RAGPopulation.GENERAL.value

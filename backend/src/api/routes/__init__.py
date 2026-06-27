@@ -17,6 +17,7 @@ from src.api.routes.chat import router as chat_router
 from src.api.routes.documents import router as documents_router
 from src.api.routes.search import router as search_router
 from src.api.routes.feedback import router as feedback_router
+from src.api.routes.metadata import router as metadata_router
 from src.api.routes.admin import admin_router
 
 router = APIRouter()
@@ -26,6 +27,9 @@ router.include_router(health_router, prefix="/health", tags=["Health"])
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 router.include_router(auth_router, prefix="/auth", tags=["Auth"])
+
+# ── Metadata extraction ──────────────────────────────────────────────────────
+router.include_router(metadata_router, prefix="/metadata", tags=["Metadata"])
 
 # ── Profile & Consent ─────────────────────────────────────────────────────────
 router.include_router(profile_router, prefix="/profile", tags=["Profile"])

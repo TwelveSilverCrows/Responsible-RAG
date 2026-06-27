@@ -33,14 +33,27 @@ Drop `.txt` or `.pdf` files into `resources/` (sub-directories are scanned recur
 
 ### 3a. Run locally (backend only)
 
+Requires a running MongoDB instance.  The easiest way is via Docker:
+
+```bash
+docker run -d --name rag-mongo \
+  -p 27017:27017 \
+  -e MONGO_INITDB_ROOT_USERNAME=rag \
+  -e MONGO_INITDB_ROOT_PASSWORD=ragpassword \
+  -e MONGO_INITDB_DATABASE=responsible_rag \
+  mongo:7
+```
+
+Then start the backend:
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-streamlit run backend/app.py
+uvicorn backend.app:app --reload --port 8000
 ```
 
-Open [http://localhost:8501](http://localhost:8501).
+Open [http://localhost:8000/docs](http://localhost:8000/docs).
 
 For the frontend, see `frontend/package.json` scripts (requires Bun or Node):
 
@@ -54,24 +67,27 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ### 3b. Run via Docker
 
-Build and start all services:
+Build and start all services (MongoDB, backend, frontend, and optionally Caddy):
 
 ```bash
 docker compose up --build
 ```
 
-Open the frontend at [http://localhost:3000](http://localhost:3000) and the backend at [http://localhost:8501](http://localhost:8501).
+Open the frontend at [http://localhost:3000](http://localhost:3000) and the backend API at [http://localhost:8000/docs](http://localhost:8000/docs).
 
 ---
 
 ## Docker Compose Reference
 
-The stack consists of two services:
+The stack consists of three services:
 
-| Service   | Container         | Port  | Tech                |
-|-----------|-------------------|-------|----------------------|
-| Frontend  | `rag-frontend`    | 3000  | Vite + React (Bun)  |
-| Backend   | `rag-backend`     | 8501  | Streamlit (Python)  |
+| Service   | Container         | Port(s)  | Tech                          |
+|-----------|-------------------|----------|-------------------------------|
+| MongoDB   | `rag-mongo`       | 27017    | MongoDB 7 (host-persisted)    |
+| Frontend  | `rag-frontend`    | 3000     | Vite + React (Bun)            |
+| Backend   | `rag-backend`     | 8000     | FastAPI (Python)              |
+
+> **Note:** MongoDB data is stored on the host at `./data/mongo/` so it survives container restarts and rebuilds. An initialisation script (`./data/mongo/init.js`) runs automatically on first start to create the database, user, and indexes.
 
 ### Common commands
 
@@ -81,12 +97,12 @@ The stack consists of two services:
 | **Start in background** | `docker compose up --build -d` |
 | **Stop** | `docker compose down` |
 | **Stop & delete volumes** | `docker compose down -v` |
-| **Rebuild a single service** | `docker compose build frontend` or `docker compose build backend` |
+| **Rebuild a single service** | `docker compose build frontend` (or `backend`) |
 | **Restart a service** | `docker compose restart frontend` |
 | **View logs (all)** | `docker compose logs -f` |
-| **View logs (one service)** | `docker compose logs -f backend` |
+| **View logs (one service)** | `docker compose logs -f backend` (or `mongo`) |
 | **View running containers** | `docker compose ps` |
-| **Shell into a container** | `docker compose exec frontend sh` or `docker compose exec backend bash` |
+| **Shell into a container** | `docker compose exec mongo mongosh --quiet` |
 
 ---
 
@@ -94,8 +110,13 @@ The stack consists of two services:
 
 ```
 rag-chatbot/
-├── docker-compose.yml             # Orchestrates frontend + backend
+├── docker-compose.yml             # Orchestrates MongoDB + frontend + backend
 ├── .env.example                   # Copy to .env and configure
+│
+├── data/
+│   └── mongo/
+│       ├── init.js                # First-run DB/user/index creation
+│       └── ...                    # MongoDB data files (gitignored)
 │
 ├── backend/
 │   ├── Dockerfile                 # Multi-stage build (uv + hatchling)
@@ -140,6 +161,12 @@ All settings live in `.env`.  See `.env.example` for the full annotated list.
 | `USE_NOMIC` | `false` | Switch to Nomic Embed backend |
 | `USE_SEMANTIC_CHUNKING` | `true` | Disable to always use recursive splitter |
 | `VEC_WEIGHT` | `0.7` | Ensemble weight for vector retriever |
+| `MONGO_URI` | — | MongoDB connection string (local Docker or external) |
+| `MONGO_DB` | `responsible_rag` | MongoDB database name |
+| `MONGO_ROOT_USER` | `rag` | MongoDB root username (Docker init only) |
+| `MONGO_ROOT_PASSWORD` | `ragpassword` | MongoDB root password (Docker init only) |
+| `MONGO_APP_USER` | `rag` | MongoDB app user (created by init.js) |
+| `MONGO_APP_PASSWORD` | `ragpassword` | MongoDB app user password |
 
 ---
 

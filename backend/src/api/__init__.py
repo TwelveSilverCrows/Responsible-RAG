@@ -27,16 +27,15 @@ async def lifespan(app: FastAPI):
 
     Startup:
         - Connect to MongoDB (single connection pool, maxPoolSize=2).
-        - Initialize indexes.
 
     Shutdown:
         - Close MongoDB connection.
     """
     # ── Startup ───────────────────────────────────────────────────────────────
-    from src.api.db.database import get_db, init_indexes
+    from src.api.db.database import get_db
+
     client = await get_db()
     if client is not None:
-        init_indexes()
         logger.info("MongoDB connected successfully.")
     else:
         logger.warning("MongoDB not configured — database features disabled.")
@@ -45,6 +44,7 @@ async def lifespan(app: FastAPI):
 
     # ── Shutdown ──────────────────────────────────────────────────────────────
     from src.api.db.database import close_db
+
     close_db()
 
 
