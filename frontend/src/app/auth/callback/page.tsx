@@ -3,7 +3,13 @@
 import { useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore, type AuthUser } from '@/hooks/useAuth';
+import { api, type AuthUserDTO } from '@/lib/api';
 import { Loader2 } from 'lucide-react';
+
+/** Decode a JWT payload without verifying the signature. */
+function decodeJwt(token: string): Record<string, unknown> {
+  return JSON.parse(atob(token.split('.')[1]));
+}
 
 export default function AuthCallbackPage() {
   const navigate = useNavigate();
@@ -23,23 +29,56 @@ export default function AuthCallbackPage() {
       return;
     }
 
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      const role: AuthUser['role'] = payload.role === 'admin' ? 'admin' : 'user';
-      const email = payload.sub || '';
+    (async () => {
+      try {
+        const payload = decodeJwt(token);
+        const role: AuthUser['role'] = payload.role === 'admin' ? 'admin' : 'user';
+        const email = (payload.sub as string) || '';
 
-      const user: AuthUser = { id: email, email, displayName: email.split('@')[0], role, emailVerified: true };
+        // Temporarily store token so the api helper can read it for the /me call
+        const tempUser: AuthUser = {
+          id: email,
+          email,
+          displayName: email.split('@')[0],
+          role,
+          emailVerified: true,
+        };
 
-      if (isNew) {
-        loginAsNewUser(user, token);
-        navigate('/onboarding/welcome', { replace: true });
-      } else {
-        login(user, token);
-        navigate(role === 'admin' ? '/admin' : '/chat', { replace: true });
+        if (isNew) {
+          loginAsNewUser(tempUser, token);
+        } else {
+          login(tempUser, token);
+        }
+
+        // Fetch the real profile (includes name from Google / database)
+        let displayName = email.split('@')[0];
+        try {
+          const profile: AuthUserDTO = await api.auth.me();
+          displayName = profile.name || displayName;
+        } catch {
+          // /me may be unavailable for brand-new users; fall back gracefully
+        }
+
+        // Update the store with the real name
+        const realUser: AuthUser = {
+          id: email,
+          email,
+          displayName,
+          role,
+          emailVerified: true,
+        };
+
+        if (isNew) {
+          loginAsNewUser(realUser, token);
+          navigate('/onboarding/welcome', { replace: true });
+        } else {
+          login(realUser, token);
+          navigate(role === 'admin' ? '/admin' : '/chat', { replace: true });
+        }
+      } catch {
+        navigate('/login?error=invalid_token', { replace: true });
       }
-    } catch {
-      navigate('/login?error=invalid_token', { replace: true });
-    }
+    })();
   }, [searchParams, login, loginAsNewUser, navigate]);
 
   return (

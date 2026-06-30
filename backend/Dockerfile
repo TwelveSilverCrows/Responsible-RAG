@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         ffmpeg \
+        gosu \
     && update-ca-certificates --fresh \
     && rm -rf /var/lib/apt/lists/*
 
@@ -28,7 +29,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl --fail http://localhost:8000/api/v1/health || exit 1
 
-RUN useradd --create-home --shell /bin/bash appuser \
+RUN useradd --create-home --shell /bin/bash --uid 1000 appuser \
  && chown -R appuser:appuser /app
 USER appuser
 

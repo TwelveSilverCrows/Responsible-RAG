@@ -118,3 +118,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    # Run as root so the startup chown (below) can fix bind-mount permissions,
+    # then gosu drops to appuser (UID 1000) before running the app.
+    user: "0:0"
+    command: >
+      sh -c "chown -R appuser:appuser /app/vectordb
+      && exec gosu appuser uvicorn app:app --host 0.0.0.0 --port 8000 --workers 1 --no-server-header --loop uvloop"
