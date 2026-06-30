@@ -39,7 +39,7 @@ services:
   # MongoDB — Off-the-shelf, data persisted on the host
   # ---------------------------------------------------------------------------
   mongo:
-    image: mongo:7
+    image: mongo:latest
     container_name: rag-mongo
     restart: unless-stopped
     ports:
@@ -118,9 +118,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-    # Run as root so the startup chown (below) can fix bind-mount permissions,
-    # then gosu drops to appuser (UID 1000) before running the app.
-    user: "0:0"
-    command: >
-      sh -c "chown -R appuser:appuser /app/vectordb
-      && exec gosu appuser uvicorn app:app --host 0.0.0.0 --port 8000 --workers 1 --no-server-header --loop uvloop"
+    # Run as appuser (UID 1000). Make sure ./vectordb is owned by 1000:1000
+    # on the host (run: sudo chown -R 1000:1000 ./vectordb).
+    user: "1000:1000"

@@ -28,6 +28,20 @@ env
 .pytest_cache
 .coverage
 htmlcov
+
+# Heavy data dirs (not needed for builds)
+data/
+vectordb/
+vectordb_profiles/
+resources/
+
+# Source not needed for backend builds
+frontend/
+scripts/
+tests/
+
+# Environment files
+.env
 .tox
 .mypy_cache
 .ruff_cache

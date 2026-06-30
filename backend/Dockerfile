@@ -1,24 +1,39 @@
-FROM python:3.12-slim AS base
+# =============================================================================
+# Dockerfile — Backend (FastAPI)
+# =============================================================================
+# Multi-stage: builder has build-essential for compiling deps;
+# the runtime stage is a clean slim image with only what's needed.
+# =============================================================================
 
+FROM python:3.12-slim AS builder
+
+# Build-time deps (compilers, etc.) — NOT in the final image
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
-        ca-certificates \
         curl \
-        ffmpeg \
-        gosu \
-    && update-ca-certificates --fresh \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
-# ── Dependencies (cached separately from source) ──────────────────────────────
-FROM base AS deps
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN mkdir -p src && uv pip install --system --no-cache -e .
 
-# ── Application ───────────────────────────────────────────────────────────────
-FROM deps AS app
+# ── Runtime ───────────────────────────────────────────────────────────────────
+FROM python:3.12-slim AS app
+
+# Only runtime-needed apt packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        ffmpeg \
+    && update-ca-certificates --fresh \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed Python packages from builder (includes compiled .so files)
+COPY --from=builder /usr/local/lib/python3.12/site-packages/ /usr/local/lib/python3.12/site-packages/
+COPY --from=builder /usr/local/bin/ /usr/local/bin/
+
 WORKDIR /app
 COPY backend/app.py .
 COPY backend/src/ ./src/
