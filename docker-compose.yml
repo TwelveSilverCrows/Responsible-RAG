@@ -116,23 +116,3 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-
-  # ---------------------------------------------------------------------------
-  # Caddy — Reverse proxy with auto HTTPS
-  # ---------------------------------------------------------------------------
-  caddy:
-    image: caddy:2-alpine
-    container_name: rag-caddy
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    env_file:
-      - .env
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - frontend
-      - backend
