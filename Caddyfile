@@ -7,7 +7,7 @@
 
 {$DOMAIN:localhost} {
     # ── Security: block direct IP access (bots scraping /.env etc.) ──────────
-    @blocked `{host} != {$DOMAIN}`
+    @blocked `{host} != "{$DOMAIN}"`
     respond @blocked "Not Found" 404
 
     # ── Frontend (Vite + React SPA) ──────────────────────────────────────────
