@@ -7,14 +7,14 @@
 
 {$DOMAIN:localhost} {
     # ── Frontend (Vite + React SPA) ──────────────────────────────────────────
-    reverse_proxy localhost:3000
+    reverse_proxy frontend:80
 
     # ── Backend (FastAPI) under /api/v1/ ──────────────────────────────────────
     handle /api/v1/* {
         request_body {
             max_size 500MB
         }
-        reverse_proxy localhost:8000
+        reverse_proxy backend:8000
     }
 
     # ── Logs ─────────────────────────────────────────────────────────────────

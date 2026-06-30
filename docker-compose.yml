@@ -16,6 +16,24 @@ volumes:
 services:
 
   # ---------------------------------------------------------------------------
+  # Caddy — Reverse proxy (handles HTTPS via Let's Encrypt automatically)
+  # ---------------------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    container_name: rag-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+      - backend
+
+  # ---------------------------------------------------------------------------
   # MongoDB — Off-the-shelf, data persisted on the host
   # ---------------------------------------------------------------------------
   mongo:
