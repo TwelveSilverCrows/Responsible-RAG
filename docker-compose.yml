@@ -39,7 +39,7 @@ services:
   # MongoDB — Off-the-shelf, data persisted on the host
   # ---------------------------------------------------------------------------
   mongo:
-    image: mongo:latest
+    image: mongo:8
     container_name: rag-mongo
     restart: unless-stopped
     ports:
@@ -57,11 +57,11 @@ services:
       # Init script creates the app user + database on first run
       - ./data/mongo/init.js:/docker-entrypoint-initdb.d/init.js:ro
     healthcheck:
-      test: mongosh --quiet --eval "db.adminCommand('ping')"
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
 
   # ---------------------------------------------------------------------------
   # Frontend (Vite + React via nginx)
