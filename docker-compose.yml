@@ -39,7 +39,7 @@ services:
   # MongoDB — Off-the-shelf, data persisted on the host
   # ---------------------------------------------------------------------------
   mongo:
-    image: mongo:8
+    image: mongo:7
     container_name: rag-mongo
     restart: unless-stopped
     ports:
@@ -58,10 +58,10 @@ services:
       - ./data/mongo/init.js:/docker-entrypoint-initdb.d/init.js:ro
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
-      interval: 15s
-      timeout: 10s
-      retries: 20
-      start_period: 60s
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   # ---------------------------------------------------------------------------
   # Frontend (Vite + React via nginx)
