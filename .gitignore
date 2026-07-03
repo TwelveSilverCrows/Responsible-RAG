@@ -66,5 +66,9 @@ resources/*
 vectordb/*
 !vectordb/.gitkeep
 
+# The profiles vector store is built by scripts/build_profiles_kb.py — no need to commit it.
+vectordb_profiles/*
+!vectordb_profiles/.gitkeep
+
 # ── Docker ────────────────────────────────────────────────────────────────────
 docker-compose.override.yml
