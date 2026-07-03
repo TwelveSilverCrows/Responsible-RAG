@@ -154,14 +154,23 @@ class ProfileAugmenter:
     def _resolve_profiles_dir(cls) -> Path:
         """Walk up the directory tree to find ``vectordb_profiles/``.
 
-        Works regardless of whether the code runs from the host layout
-        (``backend/src/core/profiles.py`` → 4 levels up) or the Docker
-        layout (``src/core/profiles.py`` → 3 levels up, or any other
-        nesting), because it searches for the actual directory on disk.
+        Checks paths in order:
+        1. ``../storage/vectordb_profiles`` — new default location outside the
+           project tree (to avoid git tracking).
+        2. Walk up from the current file's directory (legacy host layout).
+        3. Fallback next to CWD (dev convenience).
         """
         if cls._PROFILES_DB_DIR is not None:
             return cls._PROFILES_DB_DIR
 
+        # 1. New default location (outside project tree)
+        storage_dir = Path.cwd().resolve().parent / "storage" / "vectordb_profiles"
+        if storage_dir.is_dir():
+            cls._PROFILES_DB_DIR = storage_dir
+            logger.info("Profiles vector store found at %s", storage_dir)
+            return storage_dir
+
+        # 2. Legacy: walk up from the current file
         start = Path(__file__).resolve().parent
         for current in [start] + list(start.parents):
             candidate = current / "vectordb_profiles"
@@ -173,7 +182,7 @@ class ProfileAugmenter:
             if current.parent == current:
                 break
 
-        # Fallback: assume next to CWD (dev convenience)
+        # 3. Fallback: next to CWD
         fallback = Path.cwd() / "vectordb_profiles"
         cls._PROFILES_DB_DIR = fallback
         return fallback

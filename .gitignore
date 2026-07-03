@@ -45,9 +45,6 @@ htmlcov/
 *.swo
 .DS_Store
 
-# ── MongoDB data (host-persisted, auto-generated) ────────────────────────────
-data/mongo/
-
 # ── Frontend (Bun/Node / Vite) ───────────────────────────────────────────────
 frontend/node_modules/
 frontend/.next/
@@ -57,18 +54,17 @@ frontend/*.tsbuildinfo
 # Keep bun.lock committed if you want reproducible installs across machines:
 frontend/bun.lock
 
-# ── Project-specific data (user-provided, never in source control) ────────────
-# Place your knowledge-base documents in resources/ — they are NOT committed.
+# ── Project-specific data (moved to ../storage/ outside project tree) ────────
+# All runtime data (vector store, profiles KB, uploads, MongoDB files) now
+# lives at ../storage/ — a sibling directory outside the git repo — so git
+# ignores it automatically.  No gitignore entry needed.
+#
+# Legacy local dirs (./vectordb, ./vectordb_profiles, ./resources, ./uploads):
+# These are being phased out.  If they still exist locally, they are ignored:
 resources/*
-!resources/.gitkeep
-
-# The vector store is rebuilt from resources/ at startup — no need to commit it.
 vectordb/*
-!vectordb/.gitkeep
-
-# The profiles vector store is built by scripts/build_profiles_kb.py — no need to commit it.
 vectordb_profiles/*
-!vectordb_profiles/.gitkeep
+uploads/*
 
 # ── Docker ────────────────────────────────────────────────────────────────────
 docker-compose.override.yml

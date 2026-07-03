@@ -10,25 +10,16 @@ database is required.
 
 Concurrency
 -----------
-All **write** operations (add, delete, update metadata, persist) are
-serialised through a :class:`threading.Lock` so that concurrent requests
-or background tasks never corrupt the in-memory store or its on-disk
-files.  **Read** operations (list, get, count) proceed without locking
-and may see a slightly stale snapshot during an active write — this is
-acceptable for the admin UI.
+In-memory state is serialised by an instance-level ``_write_lock``.
+On-disk persistence is serialised by the **module-level** ``_persist_lock``
+so concurrent ``KnowledgeBase`` instances (from separate requests) never
+race on the same directory.
 
 Embedding validation
 --------------------
 Before accepting new documents, :meth:`add_documents` performs a quick
 sanity check on a sample embedding to guard against corrupted API
 responses (NaN, all-zeros, wrong dimensions).
-
-Usage
------
-    kb = KnowledgeBase(settings, embedding_fn)
-    retriever = kb.as_retriever(k=5)
-    all_docs  = kb.get_all_documents()
-    sources   = kb.list_sources()
 """
 
 import json
@@ -47,6 +38,11 @@ from src.core.config import Settings
 from src.core.embeddings import EmbeddingValidationError, validate_embedding
 
 logger = logging.getLogger(__name__)
+
+# Module-level lock: serialises all on-disk writes across every
+# KnowledgeBase instance so concurrent requests never race on the
+# same vector-store directory or id_map.json.
+_persist_lock = threading.Lock()
 
 
 class KnowledgeBase:
@@ -79,9 +75,8 @@ class KnowledgeBase:
         self._id_map: dict[str, list[str]] = {}
         self._store: TurboQuantVectorStore
         # ── Write serialisation lock ────────────────────────────────────────
-        # All methods that mutate the store acquire this lock so concurrent
-        # background tasks and API requests don't corrupt the in-memory state
-        # or the on-disk files.
+        # Guards the in-memory _id_map and _store against concurrent
+        # mutations from background tasks and API requests.
         self._write_lock = threading.Lock()
         self._load_or_create()
 
@@ -255,43 +250,24 @@ class KnowledgeBase:
                 f"Embedding probe failed — rejecting write: {exc}"
             ) from exc
 
-    # ── Persistence (atomic write) ───────────────────────────────────────────
+    # ── Persistence (direct write, serialised across instances) ─────────────
 
     def _persist(self) -> None:
         """
-        Save the vector store and ID map to disk using atomic writes.
+        Write the current in-memory state to disk.
 
-        Writes to a temporary location first, then renames into place.
-        This prevents the corruption that occurs when a process is killed
-        mid-write or concurrent persistence operations overlap.
+        The module-level ``_persist_lock`` ensures that only one
+        ``KnowledgeBase`` instance writes to the vector-store directory
+        at a time, eliminating races between concurrent requests.
         """
         persist_path = Path(self._settings.vectordb_dir)
         persist_path.mkdir(parents=True, exist_ok=True)
 
-        # ── TurboVec store (dump to temp dir, then swap files) ────────────
-        tmp_dir = persist_path / ".tmp"
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-
-        import tempfile
-
-        with tempfile.TemporaryDirectory(dir=str(tmp_dir)) as tmp_str:
-            tmp_path = Path(tmp_str)
-            self._store.dump(str(tmp_path))
-            for fname in ("docstore.json", "index.tvim"):
-                src = tmp_path / fname
-                dst = persist_path / fname
-                if src.exists():
-                    src.replace(dst)
-
-        # ── id_map.json (atomic write) ────────────────────────────────────
-        id_map_tmp = tmp_dir / f"id_map_{os.urandom(8).hex()}.json"
-        id_map_tmp.write_text(json.dumps(self._id_map, indent=2))
-        id_map_tmp.replace(persist_path / "id_map.json")
-
-        # Clean up temp dir
-        import shutil
-
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+        with _persist_lock:
+            self._store.dump(str(persist_path))
+            (persist_path / "id_map.json").write_text(
+                json.dumps(self._id_map, indent=2),
+            )
 
         logger.debug("Persisted vector store to '%s'.", persist_path)
 
@@ -338,9 +314,12 @@ class KnowledgeBase:
                 exc,
             )
             # Back up corrupted files for forensic analysis
+            # Use a subdirectory inside persist_path because the parent
+            # directory (/storage/) may be a Docker mount point owned by
+            # root and not writable by the app user.
             import shutil
 
-            backup_dir = persist_path.parent / f"vectordb_corrupted_{os.urandom(4).hex()}"
+            backup_dir = persist_path / f".corrupted_{os.urandom(4).hex()}"
             backup_dir.mkdir(parents=True, exist_ok=True)
             for f in persist_path.glob("*"):
                 if f.name != ".gitkeep" and f.is_file():

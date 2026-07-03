@@ -53,9 +53,9 @@ services:
       MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:-ragpassword}
     volumes:
       # Host-backed persistence: data survives container restarts & rebuilds
-      - ./data/mongo:/data/db
+      - ../storage/mongo/data:/data/db
       # Init script creates the app user + database on first run
-      - ./data/mongo/init.js:/docker-entrypoint-initdb.d/init.js:ro
+      - ../storage/mongo/init.js:/docker-entrypoint-initdb.d/init.js:ro
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
       interval: 10s
@@ -105,9 +105,13 @@ services:
       # MONGO_INITDB_ROOT_USERNAME/PASSWORD (always exists).
       MONGO_URI: ${MONGO_URI:-mongodb://rag:ragpassword@mongo:27017/responsible_rag?authSource=admin}
     volumes:
-      - ./resources:/app/resources:ro
-      - ./vectordb:/app/vectordb
-      - ./vectordb_profiles:/app/vectordb_profiles:ro
+      # All data dirs live outside the project tree (../storage/) to avoid
+      # git tracking.  The app looks for them at ../storage/<name> which
+      # resolves to /storage/<name> inside the container.
+      - ../storage/resources:/storage/resources:ro
+      - ../storage/uploads:/storage/uploads
+      - ../storage/vectordb:/storage/vectordb
+      - ../storage/vectordb_profiles:/storage/vectordb_profiles:ro
     restart: unless-stopped
     depends_on:
       mongo:
@@ -118,6 +122,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-    # Run as appuser (UID 1000). Make sure ./vectordb is owned by 1000:1000
-    # on the host (run: sudo chown -R 1000:1000 ./vectordb).
+    # Run as appuser (UID 1000). Make sure ../storage/* directories are owned by 1000:1000
+    # on the host (run: sudo chown -R 1000:1000 ..//storage).
     user: "1000:1000"

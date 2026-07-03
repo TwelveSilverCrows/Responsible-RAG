@@ -92,14 +92,14 @@ class EmbeddingQuotaMonitor:
     ----------
     state_dir:
         Directory used for persisting the cooldown state file.
-        Defaults to ``"./vectordb"``.
+        Defaults to ``"../storage/vectordb"``.
     cooldown_seconds:
         Duration of the cooldown period in seconds.  Default is 7200 (2 h).
     """
 
     def __init__(
         self,
-        state_dir: str = "./vectordb",
+        state_dir: str = "../storage/vectordb",
         cooldown_seconds: int = 7200,
     ) -> None:
         self._state_path = Path(state_dir) / ".embedding_cooldown.json"

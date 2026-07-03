@@ -62,9 +62,9 @@ logger = logging.getLogger("build_profiles_kb")
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Paths (relative to project root)
-PDF_DIR = PROJECT_ROOT / "resources" / "profiles" / "pdf"
-LINKS_FILE = PROJECT_ROOT / "resources" / "profiles" / "links.txt"
-VECTORDB_DIR = PROJECT_ROOT / "vectordb_profiles"
+PDF_DIR = PROJECT_ROOT.parent / "storage" / "resources" / "profiles" / "pdf"
+LINKS_FILE = PROJECT_ROOT.parent / "storage" / "resources" / "profiles" / "links.txt"
+VECTORDB_DIR = PROJECT_ROOT.parent / "storage" / "vectordb_profiles"
 
 # Embedding model
 EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
@@ -469,7 +469,7 @@ def main():
 
             meta["source_id"] = f"pdf_{pdf_path.stem}"
             meta["filename"] = pdf_path.name
-            meta["file_path"] = str(pdf_path.relative_to(PROJECT_ROOT))
+            meta["file_path"] = str(pdf_path.relative_to(PDF_DIR.parent.parent.parent))  # storage/
             meta["ingested_at"] = datetime.now().isoformat()
 
             doc = Document(

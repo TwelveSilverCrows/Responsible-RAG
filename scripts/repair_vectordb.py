@@ -191,7 +191,7 @@ def attempt_repair(path: Path) -> bool:
 
 
 def main():
-    vectordb_dir = Path("./vectordb")
+    vectordb_dir = Path("../storage/vectordb")
     docstore_path = vectordb_dir / "docstore.json"
     
     if not docstore_path.exists():

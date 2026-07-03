@@ -144,7 +144,7 @@ def main() -> None:
     embeddings = EmbeddingFactory.create(settings)
 
     # ── Profiles vector store ─────────────────────────────────────────────
-    PROFILES_DIR = PROJECT_ROOT / "vectordb_profiles"
+    PROFILES_DIR = PROJECT_ROOT.parent / "storage" / "vectordb_profiles"
     if not (PROFILES_DIR / "index.tvim").exists():
         logger.error(
             "vectordb_profiles not found at %s.\n"

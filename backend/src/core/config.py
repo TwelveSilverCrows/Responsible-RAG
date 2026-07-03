@@ -93,12 +93,14 @@ class Settings(BaseSettings):
     embedding_cooldown_seconds: int = 7200  # 2 hours
 
     # ── Vector store (TurboVec) ──────────────────────────────────────────────
-    vectordb_dir: str = "./vectordb"
+    # All data dirs now live outside the project tree to avoid git tracking.
+    # Default: ``../storage/<name>`` (relative to project root / CWD).
+    vectordb_dir: str = "../storage/vectordb"
     turbovec_bit_width: int = 4            # 2 or 4; higher = better quality
 
     # ── Storage paths ─────────────────────────────────────────────────────────
-    resources_dir: str = "./resources"
-    upload_dir: str = "./uploads"
+    resources_dir: str = "../storage/resources"
+    upload_dir: str = "../storage/uploads"
 
     model_config = SettingsConfigDict(
         env_file=".env",

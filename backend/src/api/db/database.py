@@ -34,35 +34,36 @@ async def get_db():
     Return the application's cached MongoDB client.
 
     Creates the client on first call (lazy initialisation).
-    The client uses ``maxPoolSize=2`` for low-memory operation.
+    Also retries on subsequent calls if the previous attempt failed,
+    making transient startup race conditions self-healing.
 
     Returns
     -------
     pymongo.MongoClient
         The MongoDB client, or ``None`` if not configured.
     """
-    global _client
+    return _try_connect()
 
+
+def _try_connect() -> MongoClient | None:
+    """Synchronous helper to (re)connect to MongoDB if not already connected."""
+    global _client
     if _client is not None:
         return _client
 
     settings = get_settings()
     if not settings.mongo_uri:
-        logger.warning("MONGO_URI not set — MongoDB features disabled.")
         return None
 
     try:
-        _client = MongoClient(
-            settings.mongo_uri,
-            serverSelectionTimeoutMS=5000
-        )
-        # Verify connection
-        _client.admin.command("ping")
-        logger.info("Connected to MongoDB at %s", settings.mongo_uri.replace(settings.mongo_uri.split("@")[0], "***"))
+        client = MongoClient(settings.mongo_uri, serverSelectionTimeoutMS=5000)
+        client.admin.command("ping")
+        _client = client
+        logger.info("Connected to MongoDB at %s",
+                     settings.mongo_uri.replace(settings.mongo_uri.split("@")[0], "***"))
     except ConnectionFailure as exc:
-        logger.error("Failed to connect to MongoDB: %s", exc)
+        logger.warning("MongoDB connection failed (will retry on next request): %s", exc)
         _client = None
-        return None
 
     return _client
 
@@ -71,11 +72,14 @@ def get_database():
     """
     Get the configured database from the cached client.
 
+    Attempts to (re)connect if the client is not yet available,
+    so transient startup race conditions are self-healing.
+
     Returns
     -------
     pymongo.database.Database or None
     """
-    client = _client
+    client = _try_connect()
     if client is None:
         return None
     settings = get_settings()
