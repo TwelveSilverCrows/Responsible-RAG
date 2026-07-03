@@ -29,7 +29,7 @@ dependencies = [
     "lxml>=5.0.0",                       # Fast HTML/XML parser for bs4
     # ── Audio / YouTube transcription ─────────────────────────────────────
     "ffmpeg-python>=0.2.0",
-    "pytubefix>=6.0.0",
+    "pytubefix>=10.10.1",                  # PoToken support to bypass bot detection
     "yt-dlp>=2024.0.0",                   # Fallback for YouTube downloads
     # ── MongoDB ──────────────────────────────────────────────────────────
     "pymongo[srv]>=4.9.0",
