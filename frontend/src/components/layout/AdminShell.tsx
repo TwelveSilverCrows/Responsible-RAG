@@ -10,6 +10,7 @@ import {
   LogOut,
   Menu,
   Shield,
+  ShieldAlert,
   Sun,
   Moon,
 } from 'lucide-react';
@@ -29,6 +30,7 @@ import { useTheme } from '@/lib/themeProvider';
 
 const adminNavItems = [
   { href: '/admin', label: 'Dashboard', icon: LayoutDashboard, exact: true },
+  { href: '/admin/alerts', label: 'Alerts', icon: ShieldAlert },
   { href: '/admin/users', label: 'Users', icon: User },
   { href: '/admin/sources', label: 'Sources', icon: Database },
 ];

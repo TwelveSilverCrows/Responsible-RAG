@@ -103,13 +103,16 @@ export function useChat() {
         })),
         createdAt: new Date().toISOString(),
       });
-    } catch (err) {
+    } catch (err: any) {
       console.error('Chat API error', err);
+      const isCooldown = err?.message?.includes('503') || err?.message?.toLowerCase().includes('cooldown') || err?.message?.toLowerCase().includes('quota');
       store.addMessage({
         id: `msg-${Date.now() + 1}`,
         conversationId: convId,
         role: 'assistant',
-        content: 'Sorry, something went wrong. Please try again.',
+        content: isCooldown
+          ? 'The document search engine is temporarily unavailable due to an API quota limit. I can still answer from my general knowledge, but responses won\'t include citations to specific sources. Please try again later for source-grounded answers.'
+          : 'Sorry, something went wrong. Please try again.',
         citations: [],
         createdAt: new Date().toISOString(),
       });

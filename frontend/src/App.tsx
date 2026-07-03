@@ -21,6 +21,7 @@ const ProfilePage = lazy(() => import('@/app/profile/page'));
 const SettingsPage = lazy(() => import('@/app/settings/page'));
 const FeedbackPage = lazy(() => import('@/app/feedback/page'));
 const AdminDashboardPage = lazy(() => import('@/app/admin/page'));
+const AdminAlertsPage = lazy(() => import('@/app/admin/alerts/page'));
 const SourcesLibraryPage = lazy(() => import('@/app/admin/sources/page'));
 const AddSourcePage = lazy(() => import('@/app/admin/sources/new/page'));
 const SourceDetailPage = lazy(() => import('@/app/admin/sources/[id]/page'));
@@ -60,6 +61,7 @@ export default function App() {
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/feedback" element={<FeedbackPage />} />
                 <Route path="/admin" element={<AdminDashboardPage />} />
+                <Route path="/admin/alerts" element={<AdminAlertsPage />} />
                 <Route path="/admin/sources" element={<SourcesLibraryPage />} />
                 <Route path="/admin/sources/new" element={<AddSourcePage />} />
                 <Route path="/admin/sources/:id" element={<SourceDetailPage />} />

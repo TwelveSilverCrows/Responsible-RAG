@@ -16,8 +16,11 @@ import {
   UserCheck,
   User,
   MessageSquare,
+  Clock,
+  ShieldAlert,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -120,6 +123,44 @@ export default function AdminDashboardPage() {
             <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
               Retry
             </Button>
+          </div>
+        )}
+
+        {/* Embedding cooldown banner */}
+        {!loading && !error && stats?.embedding_cooldown_active && (
+          <Alert variant="destructive" className="border-amber-500 bg-amber-50 dark:bg-amber-950">
+            <ShieldAlert className="w-5 h-5 text-amber-600" />
+            <AlertTitle className="text-amber-800 dark:text-amber-200 font-semibold">
+              Embedding API quota reached — cooldown active
+            </AlertTitle>
+            <AlertDescription className="text-amber-700 dark:text-amber-300">
+              <p className="mb-1">
+                The HuggingFace embedding API returned a quota/rate-limit error. Semantic chunking
+                and new document ingestion are paused for approximately{' '}
+                <strong className="text-amber-900 dark:text-amber-100">
+                  {Math.ceil(stats.embedding_cooldown_remaining_seconds / 60)} minutes
+                </strong>
+                .
+              </p>
+              <p className="text-sm">
+                Existing sources can still be browsed. Chat will fall back to LLM-only mode (no
+                document retrieval). This resolves automatically when the cooldown expires.
+              </p>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Unresolved alerts badge */}
+        {!loading && !error && stats && stats.unresolved_alerts > 0 && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 px-4 py-2 rounded-lg">
+            <Clock className="w-4 h-4" />
+            <span>
+              {stats.unresolved_alerts} unresolved system alert{stats.unresolved_alerts !== 1 ? 's' : ''}
+              {' — '}
+              <Link to="/admin/alerts" className="underline hover:text-foreground">
+                View alerts
+              </Link>
+            </span>
           </div>
         )}
 

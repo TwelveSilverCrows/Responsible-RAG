@@ -309,6 +309,21 @@ export const api = {
       request<StatsResponseDTO>('GET', '/admin/dashboard/stats'),
   },
 
+  /** Admin alerts & embedding cooldown */
+  alerts: {
+    /** List all system alerts */
+    list: () =>
+      request<AdminAlertListResponseDTO>('GET', '/admin/alerts'),
+
+    /** Mark an alert as resolved */
+    resolve: (alertId: string) =>
+      request<{ status: string; alert_id: string }>('POST', `/admin/alerts/resolve?alert_id=${alertId}`),
+
+    /** Get current embedding cooldown status */
+    cooldown: () =>
+      request<CooldownStatusDTO>('GET', '/admin/alerts/cooldown'),
+  },
+
   /** Admin users management */
   users: {
     /** List all users (optionally search by name/email) */
@@ -449,6 +464,38 @@ export interface StatsResponseDTO {
   processing_sources: number;
   error_sources: number;
   incomplete_metadata: number;
+  /** Whether the embedding API is in cooldown (quota exceeded). */
+  embedding_cooldown_active: boolean;
+  /** Seconds remaining in the current cooldown (0 if none). */
+  embedding_cooldown_remaining_seconds: number;
+  /** Number of unresolved system alerts. */
+  unresolved_alerts: number;
+}
+
+// ── Admin Alert DTOs ───────────────────────────────────────────
+
+export interface AdminAlertDTO {
+  id: string;
+  type: string;
+  severity: 'info' | 'warning' | 'critical';
+  title: string;
+  message: string;
+  cooldown_until: string | null;
+  timestamp: string;
+  resolved: string;
+}
+
+export interface AdminAlertListResponseDTO {
+  alerts: AdminAlertDTO[];
+  total: number;
+  unresolved_count: number;
+}
+
+export interface CooldownStatusDTO {
+  in_cooldown: boolean;
+  remaining_seconds: number;
+  remaining_minutes: number;
+  cooldown_duration_seconds: number;
 }
 
 export interface AdaptationFieldDTO {

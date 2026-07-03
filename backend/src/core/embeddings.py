@@ -22,6 +22,7 @@ Usage
 """
 
 import logging
+import math
 
 from langchain_core.embeddings import Embeddings
 from langchain_huggingface import HuggingFaceEndpointEmbeddings
@@ -36,19 +37,84 @@ EmbeddingModel = HuggingFaceEndpointEmbeddings
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Embedding validation
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class EmbeddingValidationError(RuntimeError):
+    """Raised when an embedding vector fails validation (corrupted)."""
+
+
+def validate_embedding(embedding: list[float], label: str = "embedding") -> None:
+    """
+    Validate a single embedding vector for corruption.
+
+    Checks:
+    - Not empty
+    - No NaN or infinity values
+    - Not all zeros (typically indicates a silent failure)
+
+    Raises :class:`EmbeddingValidationError` if the vector is corrupted.
+    """
+    if not embedding:
+        raise EmbeddingValidationError(f"{label} is empty")
+
+    if all(v == 0.0 for v in embedding):
+        raise EmbeddingValidationError(f"{label} is all zeros — possible API failure")
+
+    for i, v in enumerate(embedding):
+        if math.isnan(v):
+            raise EmbeddingValidationError(f"{label} contains NaN at index {i}")
+        if math.isinf(v):
+            raise EmbeddingValidationError(f"{label} contains infinity at index {i}")
+
+
+def validate_embeddings(
+    embeddings: list[list[float]],
+    expected_dim: int | None = None,
+) -> None:
+    """
+    Validate a batch of embedding vectors.
+
+    Parameters
+    ----------
+    embeddings:
+        The list of embedding vectors to validate.
+    expected_dim:
+        If set, every vector must have exactly this many dimensions.
+    """
+    if not embeddings:
+        raise EmbeddingValidationError("embedding batch is empty")
+
+    for i, emb in enumerate(embeddings):
+        validate_embedding(emb, label=f"embedding[{i}]")
+
+    if expected_dim is not None:
+        for i, emb in enumerate(embeddings):
+            if len(emb) != expected_dim:
+                raise EmbeddingValidationError(
+                    f"embedding[{i}] has {len(emb)} dimensions, "
+                    f"expected {expected_dim}"
+                )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Quota-aware wrapper
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 class QuotaAwareEmbeddings(Embeddings):
     """
-    Wraps a LangChain-compatible ``Embeddings`` instance with quota monitoring.
+    Wraps a LangChain-compatible ``Embeddings`` instance with quota monitoring
+    and embedding validation.
 
     Every ``embed_documents`` / ``embed_query`` call is guarded by:
     1. A cooldown check — if the API is in cooldown, an
        :class:`EmbeddingCooldownError` is raised immediately.
     2. Error interception — any exception raised by the underlying embeddings
        is inspected; quota-related errors trigger a cooldown.
+    3. Validation — the returned vectors are checked for NaN, infinity,
+       and all-zero patterns that indicate a corrupted result.
 
     Parameters
     ----------
@@ -59,6 +125,8 @@ class QuotaAwareEmbeddings(Embeddings):
     def __init__(self, embeddings: Embeddings) -> None:
         self._embeddings = embeddings
         self._monitor = get_quota_monitor()
+        # Expected dimension — learned from the first successful embedding call
+        self._expected_dim: int | None = None
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """Embed a list of documents, respecting any active cooldown."""
@@ -69,7 +137,11 @@ class QuotaAwareEmbeddings(Embeddings):
                 f"Try again later."
             )
         try:
-            return self._embeddings.embed_documents(texts)
+            result = self._embeddings.embed_documents(texts)
+            self._validate_and_learn_dim(result)
+            return result
+        except EmbeddingValidationError:
+            raise
         except Exception as exc:
             self._monitor.record_error(exc)
             raise
@@ -83,10 +155,23 @@ class QuotaAwareEmbeddings(Embeddings):
                 f"Try again later."
             )
         try:
-            return self._embeddings.embed_query(text)
+            result = self._embeddings.embed_query(text)
+            validate_embedding(result, label="query_embedding")
+            if self._expected_dim is None:
+                self._expected_dim = len(result)
+            return result
+        except EmbeddingValidationError:
+            raise
         except Exception as exc:
             self._monitor.record_error(exc)
             raise
+
+    def _validate_and_learn_dim(self, embeddings: list[list[float]]) -> None:
+        """Validate a batch and learn the expected dimension from the first call."""
+        validate_embeddings(embeddings, expected_dim=self._expected_dim)
+        if self._expected_dim is None and embeddings:
+            self._expected_dim = len(embeddings[0])
+            logger.debug("Learned expected embedding dimension: %d", self._expected_dim)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
