@@ -37,6 +37,7 @@ from src.api.schemas.source import (
 from src.api.middleware import require_admin
 from src.api.services.source_service import SourceService
 from src.core.config import get_settings
+from src.core.embedding_quota import EmbeddingCooldownError
 
 # Dedicated thread pool for CPU-bound background ingest tasks so they
 # never block the asyncio event loop.
@@ -75,9 +76,23 @@ def list_sources(
     limit: int = 20,
     admin: dict = Depends(require_admin),
 ):
-    """List all knowledge-base sources (from TurboVec metadata)."""
+    """List all knowledge-base sources (from TurboVec metadata).
+
+    If the embedding API is in cooldown (quota exhausted), the endpoint
+    still returns the source list — it reads from the local vector store
+    and does **not** call the embedding API.
+    """
     service = SourceService()
-    sources = service.list_sources()
+    try:
+        sources = service.list_sources()
+    except EmbeddingCooldownError:
+        # Cooldown errors from embedding API — still serve cached data
+        # from TurboVec (no embedding calls needed for listing).
+        sources = service.list_sources()
+    except Exception:
+        logger.exception("Unexpected error listing sources")
+        raise HTTPException(status_code=500, detail="Failed to list sources")
+
     total = len(sources)
     start = (page - 1) * limit
     paged = sources[start: start + limit]
@@ -94,9 +109,17 @@ def get_source(
     source_id: str,
     admin: dict = Depends(require_admin),
 ):
-    """Get detailed metadata for a single source."""
+    """Get detailed metadata for a single source.
+
+    This endpoint reads from the local TurboVec store and does **not**
+    call the embedding API, so it works even during cooldown.
+    """
     service = SourceService()
-    meta = service.get_source(source_id)
+    try:
+        meta = service.get_source(source_id)
+    except EmbeddingCooldownError:
+        # Should not happen during source retrieval, but handle gracefully
+        meta = service.get_source(source_id)
     if meta is None:
         raise HTTPException(status_code=404, detail="Source not found")
     return _meta_to_response(meta)
@@ -186,6 +209,10 @@ def _process_upload(
     Uses ``SourceService.process_file`` for all file types (text, PDF, audio).
     Runs outside the request-response cycle.
 
+    If the embedding API is in cooldown, the file is still processed using
+    recursive chunking (no semantic chunking).  The source is indexed
+    without waiting for the cooldown to expire.
+
     Parameters
     ----------
     source_meta:
@@ -211,6 +238,16 @@ def _process_upload(
         service.finalize_source(source_id, chunks, override_meta=source_meta)
         logger.info("Background ingest complete for source %s (%d chunks)", source_id, len(chunks))
 
+    except EmbeddingCooldownError:
+        # Embedding API is in cooldown — the service already fell back
+        # to recursive chunking inside process_file(), so this should
+        # not happen.  If it does, log and fail gracefully.
+        logger.warning(
+            "Background ingest for source %s interrupted by embedding cooldown "
+            "(already fell back to recursive chunking — unusual)",
+            source_id,
+        )
+        service.fail_source(source_id, "Embedding API is in cooldown.  Try again later.")
     except Exception as exc:
         logger.error("Background ingest failed for source %s: %s", source_id, exc)
         service.fail_source(source_id, str(exc))
@@ -224,7 +261,9 @@ def _process_youtube_upload(
     """
     Background task: transcribe YouTube audio → chunk → finalize source.
 
-    Runs outside the request-response cycle.
+    Runs outside the request-response cycle.  If the embedding API is in
+    cooldown, the transcription is still chunked using the recursive
+    fallback (no semantic chunking).
     """
     service = SourceService()
     try:
@@ -236,6 +275,12 @@ def _process_youtube_upload(
         service.finalize_source(source_id, chunks)
         logger.info("Background YouTube ingest complete for source %s (%d chunks)", source_id, len(chunks))
 
+    except EmbeddingCooldownError:
+        logger.warning(
+            "YouTube ingest for source %s interrupted by embedding cooldown.",
+            source_id,
+        )
+        service.fail_source(source_id, "Embedding API is in cooldown.  Try again later.")
     except Exception as exc:
         logger.error("Background YouTube ingest failed for source %s: %s", source_id, exc)
         service.fail_source(source_id, str(exc))
@@ -329,7 +374,9 @@ def _process_webpage_upload(
     """
     Background task: scrape webpage → chunk → finalize source.
 
-    Runs outside the request-response cycle.
+    Runs outside the request-response cycle.  If the embedding API is in
+    cooldown, the content is still chunked using the recursive fallback
+    (no semantic chunking).
     """
     service = SourceService()
     try:
@@ -341,6 +388,12 @@ def _process_webpage_upload(
         service.finalize_source(source_id, chunks)
         logger.info("Background webpage ingest complete for source %s (%d chunks)", source_id, len(chunks))
 
+    except EmbeddingCooldownError:
+        logger.warning(
+            "Webpage ingest for source %s interrupted by embedding cooldown.",
+            source_id,
+        )
+        service.fail_source(source_id, "Embedding API is in cooldown.  Try again later.")
     except Exception as exc:
         logger.error("Background webpage ingest failed for source %s: %s", source_id, exc)
         service.fail_source(source_id, str(exc))

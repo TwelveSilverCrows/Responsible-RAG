@@ -86,6 +86,12 @@ class Settings(BaseSettings):
     mongo_uri: str = ""
     mongo_db: str = "responsible_rag"
 
+    # ── Embedding API cooldown ────────────────────────────────────────────────
+    # When the HuggingFace Inference API returns a quota/rate-limit error,
+    # embedding operations are paused for this many seconds to avoid
+    # repeated failures.
+    embedding_cooldown_seconds: int = 7200  # 2 hours
+
     # ── Vector store (TurboVec) ──────────────────────────────────────────────
     vectordb_dir: str = "./vectordb"
     turbovec_bit_width: int = 4            # 2 or 4; higher = better quality

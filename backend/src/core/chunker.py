@@ -16,6 +16,8 @@ Design decisions
 * **Graceful degradation**: Any runtime error during semantic chunking (e.g.
   embedding model unavailable) silently falls back to recursive splitting so
   the pipeline never hard-fails at ingest time.
+* **Cooldown-aware**: When the embedding API is in cooldown (quota exceeded),
+  semantic chunking is skipped entirely to avoid hitting the error again.
 
 Usage
 -----
@@ -40,6 +42,8 @@ import logging
 from langchain_core.documents import Document
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+from src.core.embedding_quota import EmbeddingCooldownError, get_quota_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +81,7 @@ class SmartChunker:
     ) -> None:
         self.use_semantic = use_semantic
         self.max_chunk_size = max_chunk_size
+        self._quota_monitor = get_quota_monitor()
 
         self._semantic_chunker = SemanticChunker(
             embedding_function,
@@ -96,7 +101,8 @@ class SmartChunker:
         Split *docs* into chunks and return the result.
 
         Tries semantic chunking when enabled; silently falls back to recursive
-        splitting on failure or oversized chunks.
+        splitting on failure, oversized chunks, **or** when the embedding API
+        is in cooldown (quota exceeded).
 
         Parameters
         ----------
@@ -111,6 +117,16 @@ class SmartChunker:
         if not self.use_semantic:
             return self._recursive_fallback(docs)
 
+        # ── Cooldown check ────────────────────────────────────────────────────
+        if self._quota_monitor.is_in_cooldown():
+            logger.info(
+                "Embedding API is in cooldown (~%d min remaining) — "
+                "skipping semantic chunking, using recursive fallback.",
+                self._quota_monitor.remaining_minutes(),
+            )
+            return self._recursive_fallback(docs)
+
+        # ── Semantic chunking with graceful fallback ──────────────────────────
         try:
             chunks = self._semantic_chunker.split_documents(docs)
             if any(len(c.page_content) > self.max_chunk_size for c in chunks):
@@ -120,8 +136,18 @@ class SmartChunker:
                 )
                 return self._recursive_fallback(docs)
             return chunks
+        except EmbeddingCooldownError:
+            # This can happen if the quota monitor wraps the underlying
+            # embeddings — treat the same as a cooldown skip.
+            logger.info(
+                "Embedding API cooldown error during chunking — "
+                "falling back to recursive splitter."
+            )
+            return self._recursive_fallback(docs)
         except Exception as exc:
             logger.warning("Semantic chunking failed (%s) — using recursive fallback.", exc)
+            # Record the error so the quota monitor can trigger cooldown
+            self._quota_monitor.record_error(exc)
             return self._recursive_fallback(docs)
 
     # ── Private helpers ───────────────────────────────────────────────────────

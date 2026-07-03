@@ -50,3 +50,6 @@ class StatsResponse(BaseModel):
     total_conversations: int = Field(0, description="Total conversations across all users.")
     total_users: int = Field(0, description="Total registered users.")
     incomplete_metadata: int = Field(0, description="Sources missing required fields.")
+    embedding_cooldown_active: bool = Field(False, description="Whether the embedding API is in cooldown.")
+    embedding_cooldown_remaining_seconds: float = Field(0.0, description="Seconds remaining in cooldown.")
+    unresolved_alerts: int = Field(0, description="Number of unresolved system alerts.")
