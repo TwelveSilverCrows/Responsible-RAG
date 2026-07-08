@@ -4,7 +4,6 @@ routes/admin/alerts.py — Admin system alerts
 Endpoints:
     GET  /api/v1/admin/alerts       — List system alerts (embedding quota, etc.)
     POST /api/v1/admin/alerts/resolve — Mark an alert as resolved
-    GET  /api/v1/admin/alerts/cooldown — Get current embedding cooldown status
 
 All endpoints are admin-only.
 """
@@ -16,7 +15,6 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from src.api.middleware import require_admin
 from src.api.schemas.admin_alert import AdminAlertResponse, AdminAlertListResponse
-from src.core.embedding_quota import get_quota_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -89,16 +87,3 @@ def resolve_alert(
         raise HTTPException(status_code=500, detail="Failed to resolve alert")
 
 
-@router.get("/cooldown")
-def get_cooldown_status(
-    admin: dict = Depends(require_admin),
-):
-    """Return the current embedding API cooldown status."""
-    monitor = get_quota_monitor()
-    in_cooldown = monitor.is_in_cooldown()
-    return {
-        "in_cooldown": in_cooldown,
-        "remaining_seconds": monitor.get_cooldown_remaining(),
-        "remaining_minutes": monitor.remaining_minutes(),
-        "cooldown_duration_seconds": 7200,  # default; could read from settings
-    }

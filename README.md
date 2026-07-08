@@ -6,7 +6,7 @@ A **Retrieval-Augmented Generation (RAG)** chatbot tailored for Canadian academi
 
 ## Features
 
-- **Hybrid retrieval** — ensemble of TurboVec (vector similarity) + BM25 (keyword), weighted 70/30
+- **Hybrid retrieval** — ensemble of Qdrant (vector similarity) + BM25 (keyword), weighted 70/30
 - **Smart chunking** — semantic-first via `SemanticChunker`, with automatic recursive fallback
 - **Population profiles** — four research-cited system-prompt personas (`RAGPopulation`)
 - **Cloud embeddings** — Hugging Face Inference API (same BAAI/bge-large-en-v1.5 model, zero local deps)
@@ -131,7 +131,7 @@ rag-chatbot/
 │       │   ├── profiles.py        # Audience-specific prompts
 │       │   ├── rag_chain.py       # RAGChain (full pipeline, invocable)
 │       │   ├── retrievers.py      # RetrieverFactory (ensemble BM25 + vector)
-│       │   └── vector_store.py    # TurboVec lifecycle
+│       │   └── vector_store.py    # Qdrant lifecycle
 │       └── ui/
 │           ├── app.py             # ChatView — Streamlit page controller
 │           ├── components.py      # Stateless HTML rendering helpers

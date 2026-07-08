@@ -1,17 +1,8 @@
 """
 embeddings.py — Embedding-model factory (Hugging Face Inference API)
 =====================================================================
-Uses ``langchain_huggingface.HuggingFaceEndpointEmbeddings`` to call the
-Hugging Face Inference API for feature extraction — no local GPU or heavy
-dependency (torch / optimum / openvino) required.
-
-The default model is ``BAAI/bge-large-en-v1.5``, the same model previously
-used with the OpenVINO local backend.
-
-The returned embeddings instance is wrapped with
-:class:`QuotaAwareEmbeddings` so that quota / rate-limit errors from the
-HuggingFace API are caught and trigger a cooldown period rather than
-breaking the application.
+Lightweight client that calls the HF Inference API via ``httpx`` — no
+local GPU, torch, or transformers dependency required.
 
 Usage
 -----
@@ -24,21 +15,12 @@ Usage
 import logging
 import math
 
+import httpx
 from langchain_core.embeddings import Embeddings
-from langchain_huggingface import HuggingFaceEndpointEmbeddings
 
 from src.core.config import Settings
-from src.core.embedding_quota import EmbeddingCooldownError, get_quota_monitor
 
 logger = logging.getLogger(__name__)
-
-# Type alias so callers can annotate without importing the class directly
-EmbeddingModel = HuggingFaceEndpointEmbeddings
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Embedding validation
-# ═══════════════════════════════════════════════════════════════════════════════
 
 
 class EmbeddingValidationError(RuntimeError):
@@ -46,22 +28,11 @@ class EmbeddingValidationError(RuntimeError):
 
 
 def validate_embedding(embedding: list[float], label: str = "embedding") -> None:
-    """
-    Validate a single embedding vector for corruption.
-
-    Checks:
-    - Not empty
-    - No NaN or infinity values
-    - Not all zeros (typically indicates a silent failure)
-
-    Raises :class:`EmbeddingValidationError` if the vector is corrupted.
-    """
+    """Validate a single embedding vector for corruption."""
     if not embedding:
         raise EmbeddingValidationError(f"{label} is empty")
-
     if all(v == 0.0 for v in embedding):
         raise EmbeddingValidationError(f"{label} is all zeros — possible API failure")
-
     for i, v in enumerate(embedding):
         if math.isnan(v):
             raise EmbeddingValidationError(f"{label} contains NaN at index {i}")
@@ -73,148 +44,75 @@ def validate_embeddings(
     embeddings: list[list[float]],
     expected_dim: int | None = None,
 ) -> None:
-    """
-    Validate a batch of embedding vectors.
-
-    Parameters
-    ----------
-    embeddings:
-        The list of embedding vectors to validate.
-    expected_dim:
-        If set, every vector must have exactly this many dimensions.
-    """
+    """Validate a batch of embedding vectors."""
     if not embeddings:
         raise EmbeddingValidationError("embedding batch is empty")
-
     for i, emb in enumerate(embeddings):
         validate_embedding(emb, label=f"embedding[{i}]")
-
     if expected_dim is not None:
         for i, emb in enumerate(embeddings):
             if len(emb) != expected_dim:
                 raise EmbeddingValidationError(
-                    f"embedding[{i}] has {len(emb)} dimensions, "
-                    f"expected {expected_dim}"
+                    f"embedding[{i}] has {len(emb)} dimensions, expected {expected_dim}"
                 )
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# Quota-aware wrapper
-# ═══════════════════════════════════════════════════════════════════════════════
+class HFInferenceEmbeddings(Embeddings):
+    """Lightweight Hugging Face Inference API client for feature extraction.
 
+    Replaces ``langchain_huggingface.HuggingFaceEndpointEmbeddings`` to avoid
+    importing torch/transformers (which add 10-15s to startup).
 
-class QuotaAwareEmbeddings(Embeddings):
-    """
-    Wraps a LangChain-compatible ``Embeddings`` instance with quota monitoring
-    and embedding validation.
-
-    Every ``embed_documents`` / ``embed_query`` call is guarded by:
-    1. A cooldown check — if the API is in cooldown, an
-       :class:`EmbeddingCooldownError` is raised immediately.
-    2. Error interception — any exception raised by the underlying embeddings
-       is inspected; quota-related errors trigger a cooldown.
-    3. Validation — the returned vectors are checked for NaN, infinity,
-       and all-zero patterns that indicate a corrupted result.
-
-    Parameters
-    ----------
-    embeddings:
-        The underlying LangChain ``Embeddings`` instance to wrap.
+    For BGE-family models (BAAI/bge-*) the constructor automatically applies
+    the standard BGE instruction prefixes to ensure compatibility with
+    ``OpenVINOBgeEmbeddings`` used during KB building.
     """
 
-    def __init__(self, embeddings: Embeddings) -> None:
-        self._embeddings = embeddings
-        self._monitor = get_quota_monitor()
-        # Expected dimension — learned from the first successful embedding call
-        self._expected_dim: int | None = None
+    # BGE instruction prefixes — matches OpenVINOBgeEmbeddings defaults
+    _QUERY_INSTRUCTION = "Represent this query for searching relevant passages: "
+    _DOCUMENT_INSTRUCTION = "Represent this document for retrieval: "
+
+    def __init__(self, model: str, token: str) -> None:
+        self.model = model
+        self.token = token
+        # https://huggingface.co/docs/api-inference/en/getting-started
+        self.api_url = f"https://router.huggingface.co/hf-inference/models/{model}"
+        # BGE models need instruction prefixes for consistent embeddings
+        self._is_bge = "bge" in model.lower()
+        if self._is_bge:
+            logger.info(
+                "BGE model detected — applying instruction prefixes "
+                "(query=%.40s… doc=%.40s…)",
+                self._QUERY_INSTRUCTION, self._DOCUMENT_INSTRUCTION,
+            )
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        """Embed a list of documents, respecting any active cooldown."""
-        if self._monitor.is_in_cooldown():
-            raise EmbeddingCooldownError(
-                f"Embedding API is in cooldown for another "
-                f"{self._monitor.get_cooldown_remaining():.0f}s. "
-                f"Try again later."
-            )
-        try:
-            result = self._embeddings.embed_documents(texts)
-            self._validate_and_learn_dim(result)
-            return result
-        except EmbeddingValidationError:
-            raise
-        except Exception as exc:
-            self._monitor.record_error(exc)
-            raise
+        if self._is_bge:
+            texts = [f"{self._DOCUMENT_INSTRUCTION}{t}" for t in texts]
+        resp = httpx.post(
+            self.api_url,
+            headers={"Authorization": f"Bearer {self.token}"},
+            json={"inputs": texts, "options": {"wait_for_model": True}},
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+        return resp.json()
 
     def embed_query(self, text: str) -> list[float]:
-        """Embed a query string, respecting any active cooldown."""
-        if self._monitor.is_in_cooldown():
-            raise EmbeddingCooldownError(
-                f"Embedding API is in cooldown for another "
-                f"{self._monitor.get_cooldown_remaining():.0f}s. "
-                f"Try again later."
-            )
-        try:
-            result = self._embeddings.embed_query(text)
-            validate_embedding(result, label="query_embedding")
-            if self._expected_dim is None:
-                self._expected_dim = len(result)
-            return result
-        except EmbeddingValidationError:
-            raise
-        except Exception as exc:
-            self._monitor.record_error(exc)
-            raise
-
-    def _validate_and_learn_dim(self, embeddings: list[list[float]]) -> None:
-        """Validate a batch and learn the expected dimension from the first call."""
-        validate_embeddings(embeddings, expected_dim=self._expected_dim)
-        if self._expected_dim is None and embeddings:
-            self._expected_dim = len(embeddings[0])
-            logger.debug("Learned expected embedding dimension: %d", self._expected_dim)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Factory
-# ═══════════════════════════════════════════════════════════════════════════════
+        if self._is_bge:
+            text = f"{self._QUERY_INSTRUCTION}{text}"
+        return self.embed_documents([text])[0]
 
 
 class EmbeddingFactory:
-    """Creates a quota-aware :class:`HuggingFaceEndpointEmbeddings` from settings."""
+    """Creates an HFInferenceEmbeddings client from settings."""
 
     @staticmethod
-    def create(settings: Settings) -> QuotaAwareEmbeddings:
-        """
-        Return an embedding model that calls the Hugging Face Inference API.
-
-        The returned instance is wrapped with :class:`QuotaAwareEmbeddings`
-        so that quota / rate-limit errors are caught and trigger a cooldown
-        rather than propagating as 500 errors.
-
-        Parameters
-        ----------
-        settings:
-            Application settings — must include ``huggingfacehub_api_token``
-            and ``embedding_model``.
-
-        Returns
-        -------
-        QuotaAwareEmbeddings
-        """
+    def create(settings: Settings) -> HFInferenceEmbeddings:
         token = settings.huggingfacehub_api_token
         if not token:
             raise RuntimeError(
-                "HUGGINGFACEHUB_API_TOKEN is not set. "
-                "Add it to your .env file or export the environment variable."
+                "HUGGINGFACEHUB_API_TOKEN is not set. Add it to your .env file."
             )
-
-        logger.info(
-            "Using Hugging Face Inference API (model=%s, task=feature-extraction)",
-            settings.embedding_model,
-        )
-        raw = HuggingFaceEndpointEmbeddings(
-            model=settings.embedding_model,
-            task="feature-extraction",
-            huggingfacehub_api_token=token,
-        )
-        return QuotaAwareEmbeddings(raw)
+        logger.info("Using HF Inference API (model=%s)", settings.embedding_model)
+        return HFInferenceEmbeddings(model=settings.embedding_model, token=token)

@@ -9,7 +9,6 @@
 
 # ── Named volumes for services that don't use host bind mounts ──────────────
 volumes:
-  vectordb:
   caddy_data:
   caddy_config:
 
@@ -34,6 +33,20 @@ services:
     depends_on:
       - frontend
       - backend
+  # ---------------------------------------------------------------------------
+  # qrant — Off-the-shelf, vector database on the host
+  # ---------------------------------------------------------------------------
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant-server
+    ports:
+      - "6333:6333"   # REST API
+      - "6334:6334"   # gRPC API
+    volumes:
+      - ../storage/qdrant:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    restart: unless-stopped
 
   # ---------------------------------------------------------------------------
   # MongoDB — Off-the-shelf, data persisted on the host
@@ -104,18 +117,21 @@ services:
       # authSource=admin uses the root admin user created automatically by
       # MONGO_INITDB_ROOT_USERNAME/PASSWORD (always exists).
       MONGO_URI: ${MONGO_URI:-mongodb://rag:ragpassword@mongo:27017/responsible_rag?authSource=admin}
+      # Point to the Docker Qdrant service
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6333"
     volumes:
       # All data dirs live outside the project tree (../storage/) to avoid
       # git tracking.  The app looks for them at ../storage/<name> which
       # resolves to /storage/<name> inside the container.
       - ../storage/resources:/storage/resources:ro
       - ../storage/uploads:/storage/uploads
-      - ../storage/vectordb:/storage/vectordb
-      - ../storage/vectordb_profiles:/storage/vectordb_profiles:ro
     restart: unless-stopped
     depends_on:
       mongo:
         condition: service_healthy
+      qdrant:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8000/api/v1/health"]
       interval: 30s

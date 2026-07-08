@@ -16,7 +16,6 @@ from fastapi import APIRouter, Depends
 from src.api.schemas.chat import ChatRequest
 from src.api.deps import get_rag_chain
 from src.api.middleware import get_current_user
-from src.core.rag_chain import RAGChain
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -49,7 +48,7 @@ router = APIRouter()
 @router.post("", response_model=SearchResponse)
 async def search(
     body: SearchRequest,
-    chain: RAGChain = Depends(get_rag_chain),
+    chain = Depends(get_rag_chain),
     current_user: dict | None = Depends(get_current_user),
 ):
     """

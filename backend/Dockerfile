@@ -3,6 +3,10 @@
 # =============================================================================
 # Multi-stage: builder has build-essential for compiling deps;
 # the runtime stage is a clean slim image with only what's needed.
+#
+# IMPORTANT: Only [project.dependencies] are installed — optional groups
+# (openvino, scripts) and dev-dependencies are EXCLUDED from the image.
+# This keeps the production image lean (no torch, no OpenVINO, no GPU libs).
 # =============================================================================
 
 FROM python:3.12-slim AS builder
@@ -17,12 +21,14 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN mkdir -p src && uv pip install --system --no-cache -e .
+RUN mkdir -p src \
+    && uv pip install --system --no-cache -e . \
+    && uv cache clean
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
 FROM python:3.12-slim AS app
 
-# Only runtime-needed apt packages
+# Only runtime-needed apt packages (no build-essential, no GPU libs)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
@@ -37,7 +43,7 @@ COPY --from=builder /usr/local/bin/ /usr/local/bin/
 WORKDIR /app
 COPY backend/app.py .
 COPY backend/src/ ./src/
-RUN mkdir -p /app/resources /app/vectordb
+RUN mkdir -p /app/resources
 
 EXPOSE 8000
 

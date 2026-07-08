@@ -16,8 +16,10 @@ Source validation date: June 2026
 """
 
 from enum import StrEnum
-from pathlib import Path
 from typing import Optional
+
+from qdrant_client import QdrantClient
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -134,8 +136,8 @@ _FIELD_QUERIES: dict[str, str] = {
 
 class ProfileAugmenter:
     """
-    Builds a personalised system prompt by querying the profiles knowledge
-    base (``vectordb_profiles/``) for evidence about each demographic field.
+    Builds a personalised system prompt by querying the profiles Qdrant
+    collection for evidence about each demographic field.
 
     Usage
     -----
@@ -146,46 +148,6 @@ class ProfileAugmenter:
         )
         # prompt is a fully rendered DYNAMIC_PROFILE_TEMPLATE string
     """
-
-    # Class-level cache so we only search once per process
-    _PROFILES_DB_DIR: Optional[Path] = None
-
-    @classmethod
-    def _resolve_profiles_dir(cls) -> Path:
-        """Walk up the directory tree to find ``vectordb_profiles/``.
-
-        Checks paths in order:
-        1. ``../storage/vectordb_profiles`` — new default location outside the
-           project tree (to avoid git tracking).
-        2. Walk up from the current file's directory (legacy host layout).
-        3. Fallback next to CWD (dev convenience).
-        """
-        if cls._PROFILES_DB_DIR is not None:
-            return cls._PROFILES_DB_DIR
-
-        # 1. New default location (outside project tree)
-        storage_dir = Path.cwd().resolve().parent / "storage" / "vectordb_profiles"
-        if storage_dir.is_dir():
-            cls._PROFILES_DB_DIR = storage_dir
-            logger.info("Profiles vector store found at %s", storage_dir)
-            return storage_dir
-
-        # 2. Legacy: walk up from the current file
-        start = Path(__file__).resolve().parent
-        for current in [start] + list(start.parents):
-            candidate = current / "vectordb_profiles"
-            if candidate.is_dir():
-                cls._PROFILES_DB_DIR = candidate
-                logger.info("Profiles vector store found at %s", candidate)
-                return candidate
-            # Stop before the filesystem root
-            if current.parent == current:
-                break
-
-        # 3. Fallback: next to CWD
-        fallback = Path.cwd() / "vectordb_profiles"
-        cls._PROFILES_DB_DIR = fallback
-        return fallback
 
     def __init__(self, embedding_function) -> None:
         self._embedding_function = embedding_function
@@ -200,39 +162,55 @@ class ProfileAugmenter:
 
     # ── Lazy retriever ────────────────────────────────────────────────────────
 
-    def _get_retriever(self, k: int = 3):
-        """Lazy-load the profiles TurboVec store and return a retriever."""
+    def _get_retriever(self, k: int = 5):
+        """Lazy-load the profiles Qdrant collection and return a retriever."""
         if self._retriever is not None:
             return self._retriever
 
-        store_dir = self._resolve_profiles_dir()
-        index_file = store_dir / "index.tvim"
+        from src.core.config import get_settings
 
-        if not index_file.exists():
+        settings = get_settings()
+
+        client = QdrantClient(
+            url=f"http://{settings.qdrant_host}:{settings.qdrant_port}",
+            timeout=120,
+        )
+        collection_name = settings.qdrant_profiles_collection_name
+
+        # Check collection exists — if not, warn and return None so the
+        # application falls back to default profiles.
+        collections = client.get_collections().collections
+        existing = {c.name for c in collections}
+
+        if collection_name not in existing:
             logger.warning(
-                "Profiles vector store not found at %s — "
+                "Profiles Qdrant collection '%s' not found — "
                 "using standard defaults only. "
                 "Run 'python scripts/build_profiles_kb.py' first.",
-                store_dir,
+                collection_name,
             )
             self._retriever = None
             return None
 
-        try:
-            from turbovec.langchain import TurboQuantVectorStore
+        logger.info("Using Qdrant collection '%s' for profiles", collection_name)
+        from langchain_qdrant import (
+            FastEmbedSparse,
+            QdrantVectorStore,
+            RetrievalMode,
+        )
 
-            logger.info("Loading profiles vector store from %s", store_dir)
-            store = TurboQuantVectorStore.load(
-                str(store_dir), embedding=self._embedding_function,
-            )
-            self._retriever = store.as_retriever(
-                search_type="similarity",
-                search_kwargs={"k": k},
-            )
-        except Exception as exc:
-            logger.warning("Failed to load profiles store: %s", exc)
-            self._retriever = None
-
+        # Connect with HYBRID (dense + sparse) retrieval.  The sparse
+        # embedding model must match the one used in build_profiles_kb.py.
+        vector_store = QdrantVectorStore(
+            client=client,
+            collection_name=collection_name,
+            embedding=self._embedding_function,
+            sparse_embedding=FastEmbedSparse(
+                model_name="Qdrant/bm42-all-minilm-l6-v2-attentions",
+            ),
+            retrieval_mode=RetrievalMode.HYBRID,
+        )
+        self._retriever = vector_store.as_retriever(search_kwargs={"k": k})
         return self._retriever
 
     # ── Evidence retrieval ────────────────────────────────────────────────────
@@ -268,7 +246,10 @@ class ProfileAugmenter:
                     excerpts.append(f"[From: {source_label}]\n{content}")
             return "\n\n".join(excerpts[:3])
         except Exception as exc:
-            logger.debug("Field '%s' retrieval failed: %s", field, exc)
+            logger.warning(
+                "Evidence retrieval for field '%s' failed (query=%r): %s",
+                field, query, exc,
+            )
             return ""
 
     # ── Prompt builder ────────────────────────────────────────────────────────

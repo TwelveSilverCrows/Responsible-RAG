@@ -2,8 +2,8 @@
 """
 build_profiles_kb.py — Build a dedicated vector store for profile generation
 ==============================================================================
-Ingests PDFs and web links from ``resources/profiles/`` into a separate
-TurboVec store (``vectordb_profiles/``) using local OpenVINO GPU-accelerated
+Ingests PDFs and web links from ``resources/profiles/`` into a Qdrant
+collection (``rag_profiles_collection``) using local OpenVINO GPU-accelerated
 embeddings (BAAI/bge-large-en-v1.5).
 
 Usage
@@ -12,7 +12,9 @@ Usage
     pip install -e ".[openvino]"
 
     # 2. Run the script
-    python scripts/build_profiles_kb.py
+    uv run python scripts/build_profiles_kb.py
+
+    # 3. Re-run anytime you add/change files in resources/profiles/
 
     # 3. Re-run anytime you add/change files in resources/profiles/
 
@@ -25,11 +27,11 @@ What it does
 3. **Chunking** — uses the project's ``SmartChunker`` (semantic → recursive
    fallback).
 4. **Embeddings** — ``OpenVINOBgeEmbeddings`` with GPU device (Intel GPU).
-5. **Storage** — all chunks + metadata stored in ``vectordb_profiles/`` via
-   ``TurboQuantVectorStore``.
+5. **Storage** — all chunks + metadata upserted into a Qdrant collection.
 """
 
 import argparse
+import concurrent.futures
 import json
 import logging
 import os
@@ -47,6 +49,8 @@ sys.path.insert(0, str(PROJECT_ROOT / "backend"))
 
 # ── Load .env for API tokens (HuggingFace, etc.) ─────────────────────────
 from dotenv import load_dotenv
+from langchain_core.documents import Document
+
 load_dotenv(PROJECT_ROOT / ".env")
 
 logging.basicConfig(
@@ -64,7 +68,6 @@ logger = logging.getLogger("build_profiles_kb")
 # Paths (relative to project root)
 PDF_DIR = PROJECT_ROOT.parent / "storage" / "resources" / "profiles" / "pdf"
 LINKS_FILE = PROJECT_ROOT.parent / "storage" / "resources" / "profiles" / "links.txt"
-VECTORDB_DIR = PROJECT_ROOT.parent / "storage" / "vectordb_profiles"
 
 # Embedding model
 EMBEDDING_MODEL = "BAAI/bge-large-en-v1.5"
@@ -73,8 +76,8 @@ EMBEDDING_DEVICE = "GPU"
 # Chunking
 USE_SEMANTIC_CHUNKING = False  # CPU-only: disable semantic (no GPU for chunking)
 FALLBACK_CHUNK_SIZE = 800
-CHUNK_OVERLAP = 150
-MAX_CHUNK_SIZE = 1600
+CHUNK_OVERLAP = 300
+MAX_CHUNK_SIZE = 2000
 
 # URL fetch timeout (seconds)
 URL_TIMEOUT = 15
@@ -160,15 +163,56 @@ def extract_pdf_metadata(filepath: Path) -> dict:
 
 
 def extract_pdf_content(filepath: Path) -> str:
-    """Extract full text content from a PDF."""
-    import fitz
+    """
+    Convert a PDF to clean markdown, stripping reference/bibliography sections.
+
+    Uses ``pymupdf4llm`` for structure-preserving extraction (headings, lists)
+    which yields better embeddings than raw ``page.get_text("text")``.
+    Reference sections common in academic PDFs are removed to avoid polluting
+    the vector store with citation noise.
+    """
+    import fitz  # PyMuPDF
+    import pymupdf4llm
+    import re
 
     doc = fitz.open(str(filepath))
     try:
-        pages = [page.get_text("text") for page in doc]
-        return "\n\n".join(pages)
+        md = pymupdf4llm.to_markdown(
+            doc,
+            header=False,
+            footer=False,
+            page_separators=True,
+            ignore_images=True,
+            write_images=False,
+            image_path=None,
+        )
     finally:
         doc.close()
+
+    # ── Strip reference / bibliography sections ────────────────────────────
+    ref_patterns = (
+        r'^#{1,3}\s*(?:References|REFERENCES|Bibliography|BIBLIOGRAPHY'
+        r'|Works\s+Cited|WORKS\s+CITED'
+        r'|References\s+and\s+Notes|REFERENCES\s+AND\s+NOTES'
+        r'|Cited\s+References|CITED\s+REFERENCES'
+        r'|References\s+and\s+Further\s+Reading'
+        r'|Reference\s+List|REFERENCE\s+LIST)\s*$'
+    )
+
+    lines = md.split("\n")
+    ref_start = None
+    for i, line in enumerate(lines):
+        if re.match(ref_patterns, line.strip()):
+            ref_start = i
+            break
+
+    if ref_start is not None:
+        md = "\n".join(lines[:ref_start])
+
+    # Clean surrogate characters
+    md = md.encode("utf-8", errors="surrogatepass").decode("utf-8", errors="ignore")
+
+    return md.strip()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -232,51 +276,6 @@ def fetch_webpage_docs(url: str, timeout: int = 15) -> Optional[list]:
 # Embedding factory (local OpenVINO GPU)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _batch_embed(embed_fn, texts: list[str], batch_size: int = 16,
-                 max_retries: int = 3) -> list[list[float]]:
-    """
-    Embed *texts* in small batches with retry logic.
-
-    The HF Inference API can timeout on large batches, so we split into
-    smaller chunks and retry transient errors (504, 503).
-    """
-    all_vectors: list[list[float]] = []
-    for i in range(0, len(texts), batch_size):
-        batch = texts[i:i + batch_size]
-        for attempt in range(max_retries):
-            try:
-                vectors = embed_fn(batch)
-                all_vectors.extend(vectors)
-                logger.debug("  Embedded batch %d/%d (%d texts)",
-                             i // batch_size + 1,
-                             (len(texts) + batch_size - 1) // batch_size,
-                             len(batch))
-                break
-            except Exception as exc:
-                if attempt < max_retries - 1:
-                    wait = 2 ** attempt * 5
-                    logger.warning("  Embedding batch failed (%s), retrying in %ds...", exc, wait)
-                    time.sleep(wait)
-                else:
-                    raise
-    return all_vectors
-
-
-class _ResilientEmbeddings:
-    """Wrapper that adds batching + retry to any embedding model."""
-
-    def __init__(self, inner, batch_size: int = 16):
-        self._inner = inner
-        self._batch_size = batch_size
-
-    def embed_query(self, text: str) -> list[float]:
-        return self._inner.embed_query(text)
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return _batch_embed(self._inner.embed_documents, texts,
-                            batch_size=self._batch_size)
-
-
 def create_embeddings(device: str = "GPU"):
     """
     Create a **local** OpenVINO BGE embedding model running on the
@@ -300,7 +299,7 @@ def create_embeddings(device: str = "GPU"):
     logger.info("  (First run compiles the model — may take a minute)")
 
     t0 = time.time()
-    raw = OpenVINOBgeEmbeddings(
+    embeddings = OpenVINOBgeEmbeddings(
         model_name_or_path=EMBEDDING_MODEL,
         model_kwargs={"device": device},
         encode_kwargs={
@@ -312,93 +311,201 @@ def create_embeddings(device: str = "GPU"):
     )
     elapsed = time.time() - t0
     logger.info("OpenVINO embedding model ready (%.1f s)", elapsed)
-    return _ResilientEmbeddings(raw, batch_size=16)
+    return embeddings
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Vector store
+# Vector store (Qdrant)
 # ═══════════════════════════════════════════════════════════════════════════════
+
+QDRANT_HOST = os.getenv("QDRANT_HOST", "127.0.0.1")
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
+QDRANT_URL = f"http://{QDRANT_HOST}:{QDRANT_PORT}"
+COLLECTION_NAME = os.getenv("QDRANT_PROFILES_COLLECTION_NAME", "rag_profiles_collection")
+
 
 def build_vector_store(embeddings, chunker, docs: list, force: bool = False):
     """
-    Create or replace the TurboQuantVectorStore at VECTORDB_DIR.
+    Upsert documents into the profiles Qdrant collection using LangChain's
+    ``QdrantVectorStore`` for proper embedding generation, payload layout,
+    and hybrid (dense + sparse) retrieval support.
 
     Parameters
     ----------
     embeddings:
-        OpenVINOBgeEmbeddings instance.
+        Dense embeddings instance (e.g. OpenVINOBgeEmbeddings).
     chunker:
         SmartChunker instance.
     docs:
         List of LangChain Document objects (one per source file).
     force:
-        If True, delete existing store first.
+        If True, delete and recreate the collection first — also enables
+        hybrid (dense + sparse) mode.
     """
-    from turbovec.langchain import TurboQuantVectorStore
+    from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
+    from qdrant_client import QdrantClient
 
-    if force and VECTORDB_DIR.exists():
-        import shutil
-        shutil.rmtree(VECTORDB_DIR)
-        logger.info("Removed existing vector store at %s", VECTORDB_DIR)
+    client = QdrantClient(url=QDRANT_URL, timeout=120)
 
-    VECTORDB_DIR.mkdir(parents=True, exist_ok=True)
+    # ── Sparse embeddings for hybrid search ───────────────────────────────────
+    sparse_embedding = FastEmbedSparse(
+        model_name="Qdrant/bm42-all-minilm-l6-v2-attentions",
+    )
 
-    index_file = VECTORDB_DIR / "index.tvim"
-    id_map_file = VECTORDB_DIR / "id_map.json"
+    # ── (Re)create collection with hybrid support ─────────────────────────────
+    if force:
+        try:
+            client.delete_collection(collection_name=COLLECTION_NAME)
+            logger.info("Deleted existing collection '%s'", COLLECTION_NAME)
+        except Exception:
+            pass
 
-    if index_file.exists() and not force:
-        logger.info("Loading existing store at %s", VECTORDB_DIR)
-        store = TurboQuantVectorStore.load(
-            str(VECTORDB_DIR), embedding=embeddings,
+    collections = client.get_collections().collections
+    existing = {c.name for c in collections}
+
+    if COLLECTION_NAME not in existing:
+        logger.info(
+            "Creating Qdrant collection '%s' with HYBRID (dense + sparse) support",
+            COLLECTION_NAME,
         )
-        id_map: dict[str, list[str]] = {}
-        if id_map_file.exists():
-            id_map = json.loads(id_map_file.read_text())
+        from qdrant_client.models import (
+            Distance,
+            HnswConfigDiff,
+            OptimizersConfigDiff,
+            SparseVectorParams,
+            VectorParams,
+        )
+
+        # Determine dense vector dimension from a probe
+        probe_vector = embeddings.embed_query("probe")
+        vector_size = len(probe_vector)
+
+        client.create_collection(
+            collection_name=COLLECTION_NAME,
+            vectors_config=VectorParams(
+                size=vector_size,
+                distance=Distance.COSINE,
+                hnsw_config=HnswConfigDiff(m=16, ef_construct=100),
+            ),
+            sparse_vectors_config={
+                "langchain-sparse": SparseVectorParams(),
+            },
+            optimizers_config=OptimizersConfigDiff(
+                default_segment_number=2,
+                indexing_threshold=10000,
+            ),
+        )
+        logger.info(
+            "Collection created (dense=%d, sparse=langchain-sparse)", vector_size,
+        )
     else:
-        logger.info("Creating new TurboQuantVectorStore (bit_width=4)")
-        store = TurboQuantVectorStore(
-            embedding=embeddings,
-            bit_width=4,
-        )
-        id_map = {}
+        logger.info("Using existing collection '%s'", COLLECTION_NAME)
 
-    # ── Chunk and index ───────────────────────────────────────────────────────
-    total_chunks = 0
-    for doc in docs:
+    # ── Chunk all documents (parallel) ────────────────────────────────────────
+    all_chunks: list[Document] = []
+
+    def _chunk_single(doc: Document) -> list[Document]:
+        """Chunk a single document and attach metadata."""
         source_id = doc.metadata.get("source_id", "unknown")
-        title = doc.metadata.get("title", source_id)
-        logger.info("  Chunking: %s", title)
-
         chunks = chunker.chunk([doc])
         if not chunks:
-            logger.warning("    No chunks produced — skipping")
-            continue
+            return []
 
-        # Attach metadata to every chunk
-        for chunk in chunks:
+        for idx, chunk in enumerate(chunks):
             chunk.metadata["source_id"] = source_id
-            chunk.metadata["chunk_index"] = chunks.index(chunk)
+            chunk.metadata["chunk_index"] = idx
             chunk.metadata["total_chunks"] = len(chunks)
-            # Copy all source-level metadata
             for k, v in doc.metadata.items():
                 if k not in chunk.metadata or not chunk.metadata[k]:
                     chunk.metadata[k] = v
+        return chunks
 
-        # Store in TurboVec
-        ids = store.add_documents(chunks)
-        id_map.setdefault(source_id, []).extend(ids)
-        total_chunks += len(chunks)
-        logger.info("    → %d chunks stored", len(chunks))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        chunk_futures = [executor.submit(_chunk_single, doc) for doc in docs]
+        for future in concurrent.futures.as_completed(chunk_futures):
+            chunks = future.result()
+            all_chunks.extend(chunks)
 
-    # ── Persist ───────────────────────────────────────────────────────────────
-    store.dump(str(VECTORDB_DIR))
-    id_map_file.write_text(json.dumps(id_map, indent=2))
-    logger.info(
-        "✅ Done! %d source(s), %d chunk(s) stored in %s",
-        len(id_map), total_chunks, VECTORDB_DIR,
+    if not all_chunks:
+        logger.warning("No chunks produced — nothing to index.")
+        return client, None
+
+    # ── Add chunks via QdrantVectorStore (hybrid mode) ────────────────────────
+    # This properly embeds both dense + sparse vectors and stores the
+    # payload in LangChain's standard layout:
+    #   - "page_content" key → the document text  (LangChain default)
+    #   - "metadata" key → all metadata fields (nested dict, LangChain default)
+    logger.info("  Adding %d chunks via QdrantVectorStore (HYBRID mode)...", len(all_chunks))
+
+    vector_store = QdrantVectorStore(
+        client=client,
+        collection_name=COLLECTION_NAME,
+        embedding=embeddings,
+        sparse_embedding=sparse_embedding,
+        retrieval_mode=RetrievalMode.HYBRID,
     )
 
-    return store, id_map
+    # Batch in groups to avoid oversized requests
+    BATCH_SIZE = 100
+    total_added = 0
+    for start in range(0, len(all_chunks), BATCH_SIZE):
+        batch = all_chunks[start:start + BATCH_SIZE]
+        ids = vector_store.add_documents(batch)
+        total_added += len(ids)
+        logger.debug("  Batch %d/%d: added %d chunks",
+                     start // BATCH_SIZE + 1,
+                     (len(all_chunks) + BATCH_SIZE - 1) // BATCH_SIZE,
+                     len(ids))
+
+    # ── Verify ────────────────────────────────────────────────────────────────
+    collection_info = client.get_collection(COLLECTION_NAME)
+    logger.info(
+        "✅ Done! %d source(s), %d chunk(s) stored in Qdrant collection '%s' "
+        "(total points: %d)",
+        len(docs), total_added, COLLECTION_NAME,
+        collection_info.points_count,
+    )
+
+    return client, vector_store
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Parallel helpers
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _process_single_pdf(pdf_path: Path) -> Optional[Document]:
+    """Extract metadata + content from a single PDF and return a Document."""
+    try:
+        meta = extract_pdf_metadata(pdf_path)
+        content = extract_pdf_content(pdf_path)
+        if not content.strip():
+            logger.warning("    Empty content — skipping %s", pdf_path.name)
+            return None
+
+        meta["source_id"] = f"pdf_{pdf_path.stem}"
+        meta["filename"] = pdf_path.name
+        meta["file_path"] = str(pdf_path.relative_to(PDF_DIR.parent.parent.parent))
+        meta["ingested_at"] = datetime.now().isoformat()
+        return Document(page_content=content, metadata=meta)
+    except Exception as exc:
+        logger.warning("    Failed to process %s: %s", pdf_path.name, exc)
+        return None
+
+
+def _process_single_url(url: str, timeout: int = URL_TIMEOUT) -> Optional[Document]:
+    """Fetch a single URL and return the first Document."""
+    docs = fetch_webpage_docs(url, timeout=timeout)
+    if not docs:
+        return None
+    doc = docs[0]
+    content = doc.page_content.strip()
+    if not content or len(content) < 50:
+        logger.warning("    No readable content — skipping %s", url)
+        return None
+    doc.metadata["source_id"] = f"web_{urlparse(url).netloc}"
+    doc.metadata["ingested_at"] = datetime.now().isoformat()
+    return doc
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -428,7 +535,7 @@ def main():
     logger.info("Building profiles knowledge base")
     logger.info("  PDFs:       %s", PDF_DIR)
     logger.info("  Links:      %s", LINKS_FILE)
-    logger.info("  Output:     %s", VECTORDB_DIR)
+    logger.info("  Qdrant:     %s | collection=%s", QDRANT_URL, COLLECTION_NAME)
     logger.info("  Device:     %s", args.device)
     logger.info("  Semantic:   %s", not args.no_semantic)
     logger.info("=" * 60)
@@ -449,71 +556,64 @@ def main():
     )
 
     # ── 3. Collect documents ──────────────────────────────────────────────────
-    from langchain_core.documents import Document
-
     all_docs: list[Document] = []
 
-    # ── 3a. PDFs ──────────────────────────────────────────────────────────────
-    if PDF_DIR.is_dir():
-        pdf_files = sorted(PDF_DIR.glob("*.pdf"))
-        logger.info("Found %d PDF(s)", len(pdf_files))
+    # ── 3a. PDFs (parallel extraction) ────────────────────────────────────────
+    pdf_files = list(PDF_DIR.glob("*.pdf")) if PDF_DIR.is_dir() else []
+    logger.info("Found %d PDF(s)", len(pdf_files))
 
-        for pdf_path in pdf_files:
-            logger.info("  Extracting: %s", pdf_path.name)
-            meta = extract_pdf_metadata(pdf_path)
-            content = extract_pdf_content(pdf_path)
+    if pdf_files:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            future_map = {executor.submit(_process_single_pdf, p): p for p in pdf_files}
+            for future in concurrent.futures.as_completed(future_map):
+                pdf_path = future_map[future]
+                try:
+                    doc = future.result()
+                    if doc is not None:
+                        all_docs.append(doc)
+                        meta = doc.metadata
+                        logger.info(
+                            "    ✓ %s | %s | %s",
+                            meta.get("title", pdf_path.name),
+                            meta.get("authors", ["?"])[0] if meta.get("authors") else "?",
+                            meta.get("year", "?"),
+                        )
+                    else:
+                        logger.warning("    ✗ %s — no content extracted", pdf_path.name)
+                except Exception as exc:
+                    logger.warning("    ✗ %s — %s", pdf_path.name, exc)
 
-            if not content.strip():
-                logger.warning("    Empty content — skipping")
-                continue
-
-            meta["source_id"] = f"pdf_{pdf_path.stem}"
-            meta["filename"] = pdf_path.name
-            meta["file_path"] = str(pdf_path.relative_to(PDF_DIR.parent.parent.parent))  # storage/
-            meta["ingested_at"] = datetime.now().isoformat()
-
-            doc = Document(
-                page_content=content,
-                metadata=meta,
-            )
-            all_docs.append(doc)
-            logger.info(
-                "    ✓ %s | %s | %s",
-                meta.get("title", "?"),
-                meta.get("authors", ["?"])[0] if meta.get("authors") else "?",
-                meta.get("year", "?"),
-            )
-
-    # ── 3b. Web links ─────────────────────────────────────────────────────────
+    # ── 3b. Web links (parallel fetching) ─────────────────────────────────────
+    urls: list[str] = []
     if LINKS_FILE.is_file():
         urls = [
             line.strip()
             for line in LINKS_FILE.read_text().splitlines()
             if line.strip() and not line.strip().startswith("#")
         ]
-        logger.info("Found %d URL(s)", len(urls))
+    logger.info("Found %d URL(s)", len(urls))
 
-        for url in urls:
-            logger.info("  Fetching: %s", url)
-            docs = fetch_webpage_docs(url, timeout=URL_TIMEOUT)
-            if docs is None:
-                continue
-
-            for doc in docs:
-                content = doc.page_content.strip()
-                if not content or len(content) < 50:
-                    logger.warning("    No readable content — skipping")
-                    continue
-
-                doc.metadata["source_id"] = f"web_{urlparse(url).netloc}_{len(all_docs)}"
-                doc.metadata["ingested_at"] = datetime.now().isoformat()
-                all_docs.append(doc)
-
-                logger.info(
-                    "    ✓ %s | %s",
-                    doc.metadata.get("title", "?"),
-                    doc.metadata.get("domain", "?"),
-                )
+    if urls:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            future_map = {
+                executor.submit(_process_single_url, url, URL_TIMEOUT): url
+                for url in urls
+            }
+            for future in concurrent.futures.as_completed(future_map):
+                url = future_map[future]
+                try:
+                    doc = future.result()
+                    if doc is not None:
+                        all_docs.append(doc)
+                        logger.info(
+                            "    ✓ %s | %s",
+                            doc.metadata.get("title", url),
+                            doc.metadata.get("domain", urlparse(url).netloc),
+                        )
+                    else:
+                        logger.warning("    ✗ %s — no content", url)
+                except Exception as exc:
+                    logger.warning("    ✗ %s — %s", url, exc)
 
     # ── 4. Build the vector store ─────────────────────────────────────────────
     if not all_docs:
@@ -527,11 +627,10 @@ def main():
     logger.info("")
     logger.info("Summary:")
     logger.info("  Sources indexed: %d", len(all_docs))
-    logger.info("  Store location:  %s", VECTORDB_DIR)
+    logger.info("  Qdrant collection: %s @ %s", COLLECTION_NAME, QDRANT_URL)
     logger.info("")
-    logger.info("Next step: use this store in profile generation with:")
-    logger.info("  store = TurboQuantVectorStore.load('%s', embedding=embeddings)", VECTORDB_DIR)
-    logger.info("  retriever = store.as_retriever(k=5)")
+    logger.info("Next step: the profiles retriever will connect to Qdrant automatically.")
+    logger.info("  Ensure QDRANT_HOST is set correctly in your .env or environment.")
 
 
 if __name__ == "__main__":

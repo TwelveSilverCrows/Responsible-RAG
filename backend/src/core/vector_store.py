@@ -1,19 +1,12 @@
 """
-vector_store.py — Vector-store lifecycle manager (TurboVec)
-=============================================================
-:class:`KnowledgeBase` owns the TurboVec vector store from initialisation
-through document ingestion to retrieval and source management.  It is
-the single authoritative owner of the on-disk index.
+vector_store.py — Vector-store lifecycle manager (Qdrant)
+===========================================================
+:class:`KnowledgeBase` wraps the Qdrant vector database for document
+ingestion, retrieval, and source management.  All metadata is stored
+as Qdrant payload — no external database required.
 
-All source metadata lives in the TurboVec docstore — no external
-database is required.
-
-Concurrency
------------
-In-memory state is serialised by an instance-level ``_write_lock``.
-On-disk persistence is serialised by the **module-level** ``_persist_lock``
-so concurrent ``KnowledgeBase`` instances (from separate requests) never
-race on the same directory.
+Qdrant handles all storage, persistence, and concurrency — the client
+is stateless and thread-safe.
 
 Embedding validation
 --------------------
@@ -22,16 +15,23 @@ sanity check on a sample embedding to guard against corrupted API
 responses (NaN, all-zeros, wrong dimensions).
 """
 
-import json
 import logging
-import os
-import threading
-from pathlib import Path
 from typing import Optional
 
 from langchain_core.documents import Document
-from langchain_core.vectorstores import VectorStoreRetriever
-from turbovec.langchain import TurboQuantVectorStore
+from langchain_core.retrievers import BaseRetriever
+from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
+from qdrant_client import QdrantClient
+from qdrant_client.models import (
+    Distance,
+    FieldCondition,
+    Filter,
+    HnswConfigDiff,
+    MatchValue,
+    OptimizersConfigDiff,
+    SparseVectorParams,
+    VectorParams,
+)
 
 from src.core.chunker import SmartChunker
 from src.core.config import Settings
@@ -39,24 +39,63 @@ from src.core.embeddings import EmbeddingValidationError, validate_embedding
 
 logger = logging.getLogger(__name__)
 
-# Module-level lock: serialises all on-disk writes across every
-# KnowledgeBase instance so concurrent requests never race on the
-# same vector-store directory or id_map.json.
-_persist_lock = threading.Lock()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Known embedding-model dimensions
+# ═══════════════════════════════════════════════════════════════════════════════
+# Used as a fallback when the Qdrant collection doesn't exist yet and the
+# embedding API is unreachable.  Add entries here for any model you configure
+# via the EMBEDDING_MODEL env-var.
+
+_KNOWN_MODEL_DIMS: dict[str, int] = {
+    "BAAI/bge-large-en-v1.5": 1024,
+    "BAAI/bge-base-en-v1.5": 768,
+    "BAAI/bge-small-en-v1.5": 384,
+    "text-embedding-ada-002": 1536,
+    "text-embedding-3-small": 1536,
+    "text-embedding-3-large": 3072,
+    "sentence-transformers/all-MiniLM-L6-v2": 384,
+    "sentence-transformers/all-mpnet-base-v2": 768,
+    "intfloat/e5-large-v2": 1024,
+    "intfloat/e5-base-v2": 768,
+    "thenlper/gte-large": 1024,
+    "thenlper/gte-base": 768,
+}
+
+
+def _known_model_dim(model_name: str) -> int | None:
+    """Return the known dimension for *model_name*, or ``None`` if unknown."""
+    # Try exact match first, then suffix-less match (strip fast-lane suffix).
+    dim = _KNOWN_MODEL_DIMS.get(model_name)
+    if dim is not None:
+        return dim
+    # Some models are uploaded with a revision hash appended.
+    base = model_name.split("/")[-1].split("@")[0]
+    for key, d in _KNOWN_MODEL_DIMS.items():
+        if key.endswith("/" + base):
+            return d
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# KnowledgeBase
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 class KnowledgeBase:
     """
-    Manages the TurboVec vector store, document ingestion, and source CRUD.
+    Manages document ingestion and source CRUD via Qdrant.
 
-    All source metadata is stored in the TurboVec docstore — no MongoDB.
+    All source metadata is stored as Qdrant payload — no external database.
+    Qdrant handles persistence and concurrency, so this class carries no
+    locks or in-memory state beyond the client connection.
 
     Parameters
     ----------
     settings:
-        Application settings used for paths, chunking config, etc.
+        Application settings used for Qdrant connection, chunking config, etc.
     embedding_function:
-        A LangChain-compatible embeddings instance used by TurboVec.
+        A LangChain-compatible embeddings instance.
     """
 
     def __init__(
@@ -71,39 +110,70 @@ class KnowledgeBase:
             chunk_overlap=settings.chunk_overlap,
             max_chunk_size=settings.max_chunk_size,
         )
-        # source_id → list of document IDs in the vector store
-        self._id_map: dict[str, list[str]] = {}
-        self._store: TurboQuantVectorStore
-        # ── Write serialisation lock ────────────────────────────────────────
-        # Guards the in-memory _id_map and _store against concurrent
-        # mutations from background tasks and API requests.
-        self._write_lock = threading.Lock()
-        self._load_or_create()
+        # Connect to Qdrant first so we can read the vector size from an
+        # existing collection — avoids an unnecessary (and potentially
+        # failing) call to the embedding API just for size detection.
+        self._client = QdrantClient(
+            url=f"http://{settings.qdrant_host}:{settings.qdrant_port}",
+            timeout=120,
+        )
+        self._collection_name = settings.qdrant_collection_name
+        # Determine vector dimension — prefer reading from the existing
+        # Qdrant collection; fall back to probing the embedding API.
+        self._vector_size: int = self._detect_vector_size()
+        self._ensure_collection()
+
+        # LangChain QdrantVectorStore for embedding-based operations
+        # Uses HYBRID mode (dense + sparse) for better retrieval accuracy.
+        self._sparse_embedding = FastEmbedSparse(
+            model_name="Qdrant/bm42-all-minilm-l6-v2-attentions",
+        )
+        self._vector_store = QdrantVectorStore(
+            client=self._client,
+            collection_name=self._collection_name,
+            embedding=self._embedding_function,
+            sparse_embedding=self._sparse_embedding,
+            retrieval_mode=RetrievalMode.HYBRID,
+        )
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def as_retriever(self, k: int = 5) -> VectorStoreRetriever:
-        return self._store.as_retriever(
-            search_type="similarity",
-            search_kwargs={"k": k},
-        )
+    def as_retriever(self, k: int = 5) -> BaseRetriever:
+        """Return a LangChain-compatible retriever backed by Qdrant."""
+        return self._vector_store.as_retriever(search_kwargs={"k": k})
 
     def get_all_documents(self) -> list[Document]:
-        """Return every document currently stored in the vector index."""
-        all_ids = [
-            doc_id for ids in self._id_map.values() for doc_id in ids
-        ]
-        if not all_ids:
-            return []
-        return self._store.get_by_ids(all_ids)
+        """Return every document currently stored in the Qdrant collection.
 
-    # ── Source CRUD (all metadata lives in TurboVec docstore) ─────────────────
+        Uses the standard LangChain payload layout where content lives under
+        ``page_content`` and metadata is nested under ``metadata``.
+        """
+        docs: list[Document] = []
+        next_offset = None
+        while True:
+            page = self._client.scroll(
+                collection_name=self._collection_name,
+                limit=100,
+                offset=next_offset,
+                with_payload=True,
+            )
+            points, next_offset = page
+            for point in points:
+                payload = dict(point.payload or {})
+                text = payload.pop("page_content", "")
+                meta = payload.pop("metadata", {})
+                docs.append(Document(page_content=text, metadata=meta))
+            if next_offset is None:
+                break
+        return docs
+
+    # ── Source CRUD (all metadata lives in Qdrant payload) ────────────────────
 
     def add_documents(
         self, source_id: str, source_metadata: dict, docs: list[Document],
     ) -> list[str]:
         """
-        Store documents (chunks) in TurboVec with source metadata attached.
+        Store documents (chunks) in Qdrant with source metadata attached.
 
         Performs a lightweight embedding validation before enqueuing the
         write — if the embedding function returns corrupted vectors the
@@ -122,117 +192,171 @@ class KnowledgeBase:
         Returns
         -------
         list[str]
-            TurboVec document IDs for the stored documents.
+            Qdrant point IDs (UUIDs) for the stored documents.
         """
         # ── Embedding sanity check ────────────────────────────────────────────
-        # Embed a short sample to verify the API is returning valid vectors
-        # **before** we touch the store.  This catches corrupted API responses
-        # (NaN, all-zeros, cooldown) without wasting a full batch.
         if docs:
             self._validate_embedding_sample()
 
-        with self._write_lock:
-            for doc in docs:
-                doc.metadata["source_id"] = source_id
-                doc.metadata.update(source_metadata)
-            ids = self._store.add_documents(docs)
-            self._id_map.setdefault(source_id, []).extend(ids)
-            self._persist()
-            logger.info(
-                "Stored %d document(s) for source %s",
-                len(ids), source_id,
-            )
-            return ids
+        # Attach metadata to every chunk
+        for doc in docs:
+            doc.metadata["source_id"] = source_id
+            doc.metadata.update(source_metadata)
+
+        # Delegate to QdrantVectorStore for embedding + upsert
+        ids = self._vector_store.add_documents(docs)
+        logger.info(
+            "Stored %d document(s) for source %s",
+            len(ids), source_id,
+        )
+        return ids
+
+    @staticmethod
+    def _extract_meta(payload: dict) -> dict:
+        """
+        Extract metadata from a Qdrant point payload.
+
+        LangChain's ``QdrantVectorStore`` nests metadata under a ``"metadata"``
+        key.  This helper returns the nested dict if present, falling back to
+        the raw payload for backward compatibility with flat-stored points.
+        """
+        meta = payload.get("metadata")
+        if isinstance(meta, dict):
+            return meta
+        # Flat layout fallback — strip known non-metadata keys
+        return {
+            k: v for k, v in payload.items()
+            if k not in ("page_content", "text", "langchain-sparse")
+        }
 
     def delete_source(self, source_id: str) -> bool:
-        """Delete every chunk belonging to *source_id* from the store."""
-        with self._write_lock:
-            ids = self._id_map.pop(source_id, [])
-            if not ids:
-                logger.warning("No chunks found for source %s", source_id)
-                return False
-            self._store.delete(ids)
-            self._persist()
-            logger.info(
-                "Deleted %d chunk(s) for source %s", len(ids), source_id,
+        """Delete every chunk belonging to *source_id* from Qdrant."""
+        self._client.delete(
+            collection_name=self._collection_name,
+            points_selector=Filter(
+                must=[
+                    FieldCondition(
+                        key="metadata.source_id",
+                        match=MatchValue(value=source_id),
+                    ),
+                ],
+            ),
+        )
+        # Verify deletion
+        remaining = self.chunk_count(source_id)
+        if remaining > 0:
+            logger.warning(
+                "delete_source: %d chunks still remain for source %s",
+                remaining, source_id,
             )
-            return True
+            return False
+        logger.info("Deleted source %s", source_id)
+        return True
 
     def get_source(self, source_id: str) -> Optional[dict]:
         """Return the source metadata for *source_id* (from the first chunk)."""
-        ids = self._id_map.get(source_id, [])
-        if not ids:
+        results = self._client.query_points(
+            collection_name=self._collection_name,
+            query_filter=Filter(
+                must=[
+                    FieldCondition(
+                        key="metadata.source_id",
+                        match=MatchValue(value=source_id),
+                    ),
+                ],
+            ),
+            limit=1,
+            with_payload=True,
+        )
+        if not results.points:
             return None
-        docs = self._store.get_by_ids([ids[0]])
-        if docs:
-            return dict(docs[0].metadata)
-        return None
+        payload = dict(results.points[0].payload or {})
+        return self._extract_meta(payload)
 
     def list_sources(self) -> list[dict]:
         """
         Return one metadata dict per unique ``source_id`` in the store.
 
-        Deduplicates by ``source_id`` so each source appears once.
+        Scrolls all points and deduplicates by ``source_id``.
         """
+        seen: set[str] = set()
         sources: list[dict] = []
-        for source_id in self._id_map:
-            ids = self._id_map[source_id]
-            if not ids:
-                continue
-            docs = self._store.get_by_ids([ids[0]])
-            if docs:
-                sources.append(dict(docs[0].metadata))
+        next_offset = None
+        while True:
+            page = self._client.scroll(
+                collection_name=self._collection_name,
+                limit=100,
+                offset=next_offset,
+                with_payload=True,
+            )
+            points, next_offset = page
+            for point in points:
+                meta = self._extract_meta(dict(point.payload or {}))
+                sid = meta.get("source_id", "")
+                if sid and sid not in seen:
+                    seen.add(sid)
+                    sources.append(meta)
+            if next_offset is None:
+                break
         return sources
 
     def update_source_metadata(self, source_id: str, metadata: dict) -> bool:
         """
         Update metadata on **every** chunk belonging to *source_id*.
 
-        Fields in *metadata* are merged into existing metadata (upsert).
-        TurboVec does not support partial metadata updates, so chunks
-        are re-added with merged metadata.
+        Because metadata is nested under the ``"metadata"`` payload key
+        (LangChain convention), this reads the existing metadata, merges
+        the updates, and writes the full merged dict back.
         """
-        with self._write_lock:
-            ids = self._id_map.get(source_id, [])
-            if not ids:
-                return False
-
-            docs = self._store.get_by_ids(ids)
-            if not docs:
-                return False
-
-            # Merge metadata on each doc
-            for doc in docs:
-                doc.metadata = {**doc.metadata, **metadata}
-
-            # Remove old entries and re-add with merged metadata
-            self._store.delete(ids)
-            new_ids = self._store.add_documents(docs)
-            self._id_map[source_id] = new_ids
-            self._persist()
-            logger.info(
-                "Updated metadata on %d chunk(s) for source %s",
-                len(ids), source_id,
+        # Read existing metadata from the first chunk to merge
+        existing = self.get_source(source_id)
+        if existing is None:
+            logger.warning(
+                "update_source_metadata: source %s not found", source_id,
             )
-            return True
+            return False
+        merged = {**existing, **metadata}
+        self._client.set_payload(
+            collection_name=self._collection_name,
+            payload={"metadata": merged},
+            points=Filter(
+                must=[
+                    FieldCondition(
+                        key="metadata.source_id",
+                        match=MatchValue(value=source_id),
+                    ),
+                ],
+            ),
+        )
+        logger.info(
+            "Updated metadata on all chunks for source %s", source_id,
+        )
+        return True
 
     def source_count(self) -> int:
-        """Return the number of unique sources."""
-        return len(self._id_map)
+        """Return the number of unique sources (by scrolling distinct IDs)."""
+        return len(self.list_sources())
 
     def chunk_count(self, source_id: str) -> int:
-        """Return the number of chunks for *source_id*."""
-        return len(self._id_map.get(source_id, []))
+        """Return the number of chunks for *source_id* (uses Qdrant ``count``)."""
+        result = self._client.count(
+            collection_name=self._collection_name,
+            count_filter=Filter(
+                must=[
+                    FieldCondition(
+                        key="metadata.source_id",
+                        match=MatchValue(value=source_id),
+                    ),
+                ],
+            ),
+        )
+        return result.count
 
     # ── Embedding validation ─────────────────────────────────────────────────
 
     def _validate_embedding_sample(self) -> None:
         """
         Embed a short probe string and validate the result.
-
-        This catches corrupted API responses (NaN, all-zeros, wrong
-        dimensions) **before** we call ``add_documents`` so the write
-        lock is never even contended with bad data.
 
         Raises :class:`EmbeddingValidationError` on corrupted output.
         """
@@ -243,103 +367,107 @@ class KnowledgeBase:
             raise
         except Exception as exc:
             logger.warning("Embedding probe failed: %s", exc)
-            # Don't block ingestion for transient errors — the actual
-            # ``add_documents`` call inside TurboVec will surface them.
-            # Only raise for clear corruption signals.
             raise EmbeddingValidationError(
                 f"Embedding probe failed — rejecting write: {exc}"
             ) from exc
 
-    # ── Persistence (direct write, serialised across instances) ─────────────
-
-    def _persist(self) -> None:
-        """
-        Write the current in-memory state to disk.
-
-        The module-level ``_persist_lock`` ensures that only one
-        ``KnowledgeBase`` instance writes to the vector-store directory
-        at a time, eliminating races between concurrent requests.
-        """
-        persist_path = Path(self._settings.vectordb_dir)
-        persist_path.mkdir(parents=True, exist_ok=True)
-
-        with _persist_lock:
-            self._store.dump(str(persist_path))
-            (persist_path / "id_map.json").write_text(
-                json.dumps(self._id_map, indent=2),
-            )
-
-        logger.debug("Persisted vector store to '%s'.", persist_path)
-
     # ── Private helpers ───────────────────────────────────────────────────────
 
-    def _load_or_create(self) -> None:
-        """
-        Load an existing TurboVec store or create a fresh one.
-
-        If the store files are corrupted (e.g. by a previous interrupted
-        write), they are backed up with a ``.corrupted`` suffix and a new
-        empty store is created so the application can continue operating.
-        """
-        persist_path = Path(self._settings.vectordb_dir)
-        index_file = persist_path / "index.tvim"
-
-        if not index_file.exists():
-            logger.info("No existing store found — creating new TurboQuantVectorStore.")
-            self._store = TurboQuantVectorStore(
-                embedding=self._embedding_function,
-                bit_width=4,
-            )
-            self._persist()
-            return
-
-        # ── Attempt to load the existing store ───────────────────────────
+    def _detect_vector_size(self) -> int:
+        """Return the embedding dimension — prefer existing Qdrant collection."""
+        # 1. If the collection already exists, read the vector size directly
+        #    from Qdrant — no API call needed.
         try:
-            logger.info("Loading existing vector store from '%s'.", persist_path)
-            self._store = TurboQuantVectorStore.load(
-                str(persist_path),
-                embedding=self._embedding_function,
+            collections = self._client.get_collections().collections
+            if self._collection_name in {c.name for c in collections}:
+                info = self._client.get_collection(self._collection_name)
+                dim = info.config.params.vectors.size
+                logger.info(
+                    "Read vector size %d from existing collection '%s'",
+                    dim, self._collection_name,
+                )
+                return dim
+        except Exception as exc:
+            logger.debug("Could not read vector size from Qdrant: %s", exc)
+
+        # 2. Check the known-model table so we don't need an API call for
+        #    well-known embedding models.
+        dim = _known_model_dim(self._settings.embedding_model)
+        if dim is not None:
+            logger.info(
+                "Using known dimension %d for model '%s'",
+                dim, self._settings.embedding_model,
             )
-            id_map_file = persist_path / "id_map.json"
-            if id_map_file.exists():
-                self._id_map = json.loads(id_map_file.read_text())
-            return
+            return dim
 
-        except (json.JSONDecodeError, KeyError, ValueError, OSError) as exc:
-            logger.critical(
-                "Vector store at '%s' is corrupted (%s). "
-                "Backing up and creating a fresh store. "
-                "Some indexed sources may be lost.",
-                persist_path,
-                exc,
+        # 3. Fall back to probing the embedding API.
+        try:
+            result = self._embedding_function.embed_query("probe")
+            validate_embedding(result, label="dimension probe")
+            return len(result)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to determine embedding dimension: {exc}"
+            ) from exc
+
+    def _ensure_collection(self) -> None:
+        """Create the Qdrant collection if it does not already exist.
+
+        Safe against concurrent creation: if another request (or another
+        replica) already created the collection, the 409 Conflict response
+        is caught and treated as a no-op.
+        """
+        # 1. Fast-path — collection already exists.
+        try:
+            collections = self._client.get_collections().collections
+            existing = {c.name for c in collections}
+            if self._collection_name in existing:
+                info = self._client.get_collection(self._collection_name)
+                current_size = info.config.params.vectors.size
+                if current_size != self._vector_size:
+                    logger.warning(
+                        "Collection '%s' has vector size %d, "
+                        "but embedding model produces %d. "
+                        "Consider recreating the collection.",
+                        self._collection_name, current_size,
+                        self._vector_size,
+                    )
+                logger.info(
+                    "Using Qdrant collection '%s' (size=%d, distance=COSINE)",
+                    self._collection_name, current_size,
+                )
+                return
+        except Exception as exc:
+            logger.debug("Could not list collections: %s", exc)
+
+        # 2. Attempt creation — tolerate 409 (already exists).
+        logger.info(
+            "Creating Qdrant collection '%s' (dense=%d, sparse=langchain-sparse, distance=COSINE)",
+            self._collection_name, self._vector_size,
+        )
+        try:
+            self._client.create_collection(
+                collection_name=self._collection_name,
+                vectors_config=VectorParams(
+                    size=self._vector_size,
+                    distance=Distance.COSINE,
+                    hnsw_config=HnswConfigDiff(m=16, ef_construct=100),
+                ),
+                sparse_vectors_config={
+                    "langchain-sparse": SparseVectorParams(),
+                },
+                optimizers_config=OptimizersConfigDiff(
+                    default_segment_number=2,
+                    indexing_threshold=10000,
+                ),
             )
-            # Back up corrupted files for forensic analysis
-            # Use a subdirectory inside persist_path because the parent
-            # directory (/storage/) may be a Docker mount point owned by
-            # root and not writable by the app user.
-            import shutil
-
-            backup_dir = persist_path / f".corrupted_{os.urandom(4).hex()}"
-            backup_dir.mkdir(parents=True, exist_ok=True)
-            for f in persist_path.glob("*"):
-                if f.name != ".gitkeep" and f.is_file():
-                    shutil.copy2(str(f), str(backup_dir / f.name))
-            logger.info("Corrupted store backed up to '%s'.", backup_dir)
-
-            # Clear the store directory (except .gitkeep)
-            for f in persist_path.glob("*"):
-                if f.name != ".gitkeep":
-                    if f.is_file():
-                        f.unlink()
-                    elif f.is_dir():
-                        shutil.rmtree(str(f), ignore_errors=True)
-
-            # Create fresh store
-            self._store = TurboQuantVectorStore(
-                embedding=self._embedding_function,
-                bit_width=4,
-            )
-            self._id_map = {}
-            self._persist()
-            logger.info("Fresh vector store created at '%s'.", persist_path)
+        except Exception as exc:
+            exc_str = str(exc)
+            if "already exists" in exc_str or "409" in exc_str:
+                logger.info(
+                    "Collection '%s' already exists (concurrent creation).",
+                    self._collection_name,
+                )
+            else:
+                raise
 

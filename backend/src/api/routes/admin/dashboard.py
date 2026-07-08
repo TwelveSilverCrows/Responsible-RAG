@@ -23,15 +23,8 @@ def get_dashboard_stats(admin: dict = Depends(require_admin)):
     Admin-only.
     """
     from src.api.services.source_service import SourceService
-    from src.core.embedding_quota import get_quota_monitor
-
     source_service = SourceService()
     stats = source_service.get_stats()
-
-    # Embedding cooldown status
-    monitor = get_quota_monitor()
-    stats["embedding_cooldown_active"] = monitor.is_in_cooldown()
-    stats["embedding_cooldown_remaining_seconds"] = monitor.get_cooldown_remaining()
 
     # Unresolved admin alerts count
     try:

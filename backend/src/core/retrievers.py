@@ -55,7 +55,7 @@ class RetrieverFactory:
         ----------
         vec_retriever:
             Pre-built vector-similarity retriever (e.g. from
-            :meth:`KnowledgeBase.as_retriever`).
+            :class:`KnowledgeBase`'s ``as_retriever()``).
         all_docs:
             The full document corpus for building the BM25 index (in-memory).
         settings:

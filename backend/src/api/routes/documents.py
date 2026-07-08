@@ -2,7 +2,7 @@
 routes/documents.py — Document ingestion (public)
 ===================================================
 Public endpoint for document upload with background processing.
-Status tracked in TurboVec metadata.
+Status tracked in Qdrant payload.
 
 Endpoints:
     POST /api/v1/documents/upload  — Upload a file → background ingest

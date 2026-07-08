@@ -1,7 +1,7 @@
 """
 routes/admin/sources.py — Admin source management
 ===================================================
-All data lives in TurboVec — status tracked via placeholder docs.
+All data lives in Qdrant — status tracked via placeholder points.
 
 Endpoints:
     GET    /api/v1/admin/sources           — List all sources
@@ -37,7 +37,6 @@ from src.api.schemas.source import (
 from src.api.middleware import require_admin
 from src.api.services.source_service import SourceService
 from src.core.config import get_settings
-from src.core.embedding_quota import EmbeddingCooldownError
 
 # Dedicated thread pool for CPU-bound background ingest tasks so they
 # never block the asyncio event loop.
@@ -49,7 +48,7 @@ router = APIRouter()
 
 
 def _meta_to_response(meta: dict) -> SourceResponse:
-    """Convert a metadata dict from TurboVec to a SourceResponse."""
+    """Convert a metadata dict from Qdrant payload to a SourceResponse."""
     return SourceResponse(
         id=meta.get("source_id", ""),
         title=meta.get("title", ""),
@@ -76,18 +75,14 @@ def list_sources(
     limit: int = 20,
     admin: dict = Depends(require_admin),
 ):
-    """List all knowledge-base sources (from TurboVec metadata).
+    """List all knowledge-base sources (from Qdrant payload).
 
     If the embedding API is in cooldown (quota exhausted), the endpoint
-    still returns the source list — it reads from the local vector store
+    still returns the source list — it reads from Qdrant
     and does **not** call the embedding API.
     """
     service = SourceService()
     try:
-        sources = service.list_sources()
-    except EmbeddingCooldownError:
-        # Cooldown errors from embedding API — still serve cached data
-        # from TurboVec (no embedding calls needed for listing).
         sources = service.list_sources()
     except Exception:
         logger.exception("Unexpected error listing sources")
@@ -111,15 +106,15 @@ def get_source(
 ):
     """Get detailed metadata for a single source.
 
-    This endpoint reads from the local TurboVec store and does **not**
+    This endpoint reads from Qdrant and does **not**
     call the embedding API, so it works even during cooldown.
     """
     service = SourceService()
     try:
         meta = service.get_source(source_id)
-    except EmbeddingCooldownError:
-        # Should not happen during source retrieval, but handle gracefully
-        meta = service.get_source(source_id)
+    except Exception:
+        logger.exception("Unexpected error getting source")
+        raise HTTPException(status_code=500, detail="Failed to get source")
     if meta is None:
         raise HTTPException(status_code=404, detail="Source not found")
     return _meta_to_response(meta)
@@ -166,7 +161,7 @@ async def update_source(
 
             loop = asyncio.get_event_loop()
             # Pass the full metadata snapshot to avoid a race with the
-            # background thread reading stale data from TurboVec.
+            # background thread reading stale data from Qdrant.
             loop.run_in_executor(
                 _background_executor,
                 _process_upload,
@@ -185,7 +180,7 @@ def delete_source(
     source_id: str,
     admin: dict = Depends(require_admin),
 ):
-    """Delete a source and all its chunks from TurboVec."""
+    """Delete a source and all its chunks from Qdrant."""
     service = SourceService()
     deleted = service.delete_source(source_id)
     if not deleted:
@@ -204,7 +199,7 @@ def _process_upload(
 ) -> None:
     """
     Background task: save to temp → process (load/transcribe + chunk)
-    → finalize source in TurboVec.
+    → finalize source in Qdrant.
 
     Uses ``SourceService.process_file`` for all file types (text, PDF, audio).
     Runs outside the request-response cycle.
@@ -217,7 +212,7 @@ def _process_upload(
     ----------
     source_meta:
         Optional full metadata snapshot captured at call time so the
-        background thread does not need to re-read from TurboVec
+        background thread does not need to re-read from Qdrant
         (avoids races with concurrent PUT metadata updates).
     """
     service = SourceService()
@@ -238,16 +233,6 @@ def _process_upload(
         service.finalize_source(source_id, chunks, override_meta=source_meta)
         logger.info("Background ingest complete for source %s (%d chunks)", source_id, len(chunks))
 
-    except EmbeddingCooldownError:
-        # Embedding API is in cooldown — the service already fell back
-        # to recursive chunking inside process_file(), so this should
-        # not happen.  If it does, log and fail gracefully.
-        logger.warning(
-            "Background ingest for source %s interrupted by embedding cooldown "
-            "(already fell back to recursive chunking — unusual)",
-            source_id,
-        )
-        service.fail_source(source_id, "Embedding API is in cooldown.  Try again later.")
     except Exception as exc:
         logger.error("Background ingest failed for source %s: %s", source_id, exc)
         service.fail_source(source_id, str(exc))
@@ -275,12 +260,6 @@ def _process_youtube_upload(
         service.finalize_source(source_id, chunks)
         logger.info("Background YouTube ingest complete for source %s (%d chunks)", source_id, len(chunks))
 
-    except EmbeddingCooldownError:
-        logger.warning(
-            "YouTube ingest for source %s interrupted by embedding cooldown.",
-            source_id,
-        )
-        service.fail_source(source_id, "Embedding API is in cooldown.  Try again later.")
     except Exception as exc:
         logger.error("Background YouTube ingest failed for source %s: %s", source_id, exc)
         service.fail_source(source_id, str(exc))
@@ -388,12 +367,6 @@ def _process_webpage_upload(
         service.finalize_source(source_id, chunks)
         logger.info("Background webpage ingest complete for source %s (%d chunks)", source_id, len(chunks))
 
-    except EmbeddingCooldownError:
-        logger.warning(
-            "Webpage ingest for source %s interrupted by embedding cooldown.",
-            source_id,
-        )
-        service.fail_source(source_id, "Embedding API is in cooldown.  Try again later.")
     except Exception as exc:
         logger.error("Background webpage ingest failed for source %s: %s", source_id, exc)
         service.fail_source(source_id, str(exc))

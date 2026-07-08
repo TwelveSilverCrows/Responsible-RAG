@@ -1,6 +1,10 @@
 """
-repair_vectordb.py — Try to recover a corrupted TurboVec docstore.json
-=======================================================================
+repair_vectordb.py — [LEGACY] Try to recover a corrupted TurboVec docstore.json
+================================================================================
+**This script is no longer needed** — the project now uses Qdrant (external
+vector database) instead of TurboVec for storage.  It is kept for reference
+only and will be removed in a future cleanup.
+
 The docstore.json file contains all document text and metadata. If it gets
 corrupted (e.g. by concurrent/interrupted writes), TurboVec cannot load.
 

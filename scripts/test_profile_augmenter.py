@@ -2,9 +2,9 @@
 """
 test_profile_augmenter.py — Real RAG-powered profile test
 ============================================================
-Loads ``vectordb_profiles/``, queries each demographic field with a
-retriever + DeepSeek LLM, and builds a tailored communication-rules
-prompt.  Only non-default fields trigger a store lookup.
+Queries the profiles Qdrant collection, retrieves evidence for each
+demographic field via a retriever + DeepSeek LLM, and builds a tailored
+communication-rules prompt.  Only non-default fields trigger a lookup.
 
 Usage
 -----
@@ -13,14 +13,13 @@ Usage
 
 import logging
 import sys
-from pathlib import Path
 from operator import itemgetter
+from pathlib import Path
 
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from turbovec.langchain import TurboQuantVectorStore
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "backend"))
@@ -28,6 +27,8 @@ sys.path.insert(0, str(PROJECT_ROOT / "backend"))
 from src.core.config import get_settings
 from src.core.embeddings import EmbeddingFactory
 from src.core.profiles import DYNAMIC_PROFILE_TEMPLATE
+from langchain_qdrant import QdrantVectorStore
+from qdrant_client import QdrantClient
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1.  SET YOUR TEST PROFILE HERE  (edit these variables manually)
@@ -143,19 +144,35 @@ def main() -> None:
     # ── Embedding model ───────────────────────────────────────────────────
     embeddings = EmbeddingFactory.create(settings)
 
-    # ── Profiles vector store ─────────────────────────────────────────────
-    PROFILES_DIR = PROJECT_ROOT.parent / "storage" / "vectordb_profiles"
-    if not (PROFILES_DIR / "index.tvim").exists():
+    # ── Profiles Qdrant collection ────────────────────────────────────────
+    client = QdrantClient(
+        url=f"http://{settings.qdrant_host}:{settings.qdrant_port}",
+        timeout=120,
+    )
+    collection_name = settings.qdrant_profiles_collection_name
+
+    collections = client.get_collections().collections
+    existing = {c.name for c in collections}
+    if collection_name not in existing:
         logger.error(
-            "vectordb_profiles not found at %s.\n"
+            "Profiles Qdrant collection '%s' not found.\n"
             "Run:  uv run python scripts/build_profiles_kb.py --force",
-            PROFILES_DIR,
+            collection_name,
         )
         sys.exit(1)
 
-    logger.info("Loading profiles vector store from %s", PROFILES_DIR)
-    store = TurboQuantVectorStore.load(str(PROFILES_DIR), embedding=embeddings)
-    retriever = store.as_retriever(search_type="similarity", search_kwargs={"k": 5})
+    logger.info("Using Qdrant collection '%s' for profiles", collection_name)
+    from langchain_qdrant import FastEmbedSparse, RetrievalMode
+    vector_store = QdrantVectorStore(
+        client=client,
+        collection_name=collection_name,
+        embedding=embeddings,
+        sparse_embedding=FastEmbedSparse(
+            model_name="Qdrant/bm42-all-minilm-l6-v2-attentions",
+        ),
+        retrieval_mode=RetrievalMode.HYBRID,
+    )
+    retriever = vector_store.as_retriever(search_kwargs={"k": 5})
 
     # ── LLM ───────────────────────────────────────────────────────────────
     llm = init_chat_model(

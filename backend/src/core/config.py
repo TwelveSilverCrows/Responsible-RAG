@@ -43,7 +43,7 @@ class Settings(BaseSettings):
 
     # ── Admin credentials (login via .env, not in DB) ──────────────────────
     # Reads from DUMMY_ADMIN_EMAIL / DUMMY_ADMIN_PASSWORD in .env
-    admin_email: str = "admin@responsablefrontier.com"
+    admin_email: str = "admin@domain.com"
     admin_password: str = "admin123"
 
     # ── Domain (used by Caddy in prod profile) ─────────────────────────────
@@ -86,17 +86,13 @@ class Settings(BaseSettings):
     mongo_uri: str = ""
     mongo_db: str = "responsible_rag"
 
-    # ── Embedding API cooldown ────────────────────────────────────────────────
-    # When the HuggingFace Inference API returns a quota/rate-limit error,
-    # embedding operations are paused for this many seconds to avoid
-    # repeated failures.
-    embedding_cooldown_seconds: int = 7200  # 2 hours
-
-    # ── Vector store (TurboVec) ──────────────────────────────────────────────
-    # All data dirs now live outside the project tree to avoid git tracking.
-    # Default: ``../storage/<name>`` (relative to project root / CWD).
-    vectordb_dir: str = "../storage/vectordb"
-    turbovec_bit_width: int = 4            # 2 or 4; higher = better quality
+    # ── Vector store (Qdrant) ──────────────────────────────────────────────
+    # Qdrant is a separate service — the backend connects via HTTP.
+    # Use 127.0.0.1 instead of localhost to avoid IPv6 resolution issues on Windows.
+    qdrant_host: str = "127.0.0.1"
+    qdrant_port: int = 6333
+    qdrant_collection_name: str = "rag_kb_collection"
+    qdrant_profiles_collection_name: str = "rag_profiles_collection"
 
     # ── Storage paths ─────────────────────────────────────────────────────────
     resources_dir: str = "../storage/resources"

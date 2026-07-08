@@ -11,9 +11,6 @@ from src.api.schemas.chat import (
 )
 from src.api.middleware import get_current_user
 from src.api.deps import get_rag_chain, get_profile_generator
-from src.api.services.profile_generator_service import ProfileGeneratorService
-from src.core.rag_chain import RAGChain
-from src.core.embedding_quota import EmbeddingCooldownError
 
 router = APIRouter()
 
@@ -194,8 +191,8 @@ async def get_messages(
 @router.post("")
 async def chat(
     body: ChatRequest,
-    chain: RAGChain = Depends(get_rag_chain),
-    generator: ProfileGeneratorService = Depends(get_profile_generator),
+    chain = Depends(get_rag_chain),
+    generator = Depends(get_profile_generator),
     current_user: dict = Depends(get_current_user),
 ):
     db = _get_db()
@@ -237,21 +234,8 @@ async def chat(
             "created_at": now,
         })
 
-    # Invoke RAG (handles EmbeddingCooldownError internally with degraded mode)
-    try:
-        result = chain.invoke(body.question, group_prompt)
-    except EmbeddingCooldownError:
-        # If the cooldown error wasn't caught internally (belt-and-suspenders)
-        from src.core.embedding_quota import get_quota_monitor
-        monitor = get_quota_monitor()
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                f"The embedding API is temporarily unavailable (quota exceeded). "
-                f"Please try again in approximately {monitor.remaining_minutes()} minutes."
-            ),
-            headers={"Retry-After": str(int(monitor.get_cooldown_remaining()))},
-        )
+    # Invoke RAG
+    result = chain.invoke(body.question, group_prompt)
 
     citations = [
         CitationSchema(
@@ -386,7 +370,7 @@ def _map_profile_to_generation(profile_doc: dict) -> dict[str, str]:
 
 
 def _build_profile_prompt(
-    db, generator: ProfileGeneratorService, current_user: dict, query: str,
+    db, generator, current_user: dict, query: str,
 ) -> str:
     """
     Build a personalised system prompt from the user's stored demographic profile.

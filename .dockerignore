@@ -28,6 +28,24 @@ env
 .pytest_cache
 .coverage
 htmlcov
+tests/
+
+# Storage (large data files — mounted at runtime, not needed in the image)
+storage/
+../storage/
+
+# Scripts (not installed in the image — only needed for dev/admin)
+scripts/
+
+# Docs
+*.md
+README.md
+LICENSE
+example.env
+
+# Environment files
+.env
+.env.*
 
 # Heavy data dirs (not needed for builds)
 data/

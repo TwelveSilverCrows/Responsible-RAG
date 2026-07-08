@@ -109,7 +109,7 @@ async def generate_profile(
     """
     Generate a personalised system prompt from demographic profile data.
 
-    Uses the profiles knowledge base (``vectordb_profiles/``) to retrieve
+    Uses the profiles Qdrant collection to retrieve
     evidence-based communication rules for each demographic field, then
     renders the full ``DYNAMIC_PROFILE_TEMPLATE``.
 

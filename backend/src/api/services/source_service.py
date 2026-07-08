@@ -1,15 +1,15 @@
 """
-services/source_service.py — Source management (TurboVec)
-==========================================================
-All source metadata + status lives in TurboVec document metadata.
+services/source_service.py — Source management (Qdrant)
+========================================================
+All source metadata + status lives in Qdrant point payloads.
 Processing status ("processing" → "indexed" | "error") is tracked
-via a placeholder document that gets replaced once ingestion completes.
+via placeholder points that get replaced once ingestion completes.
 
 Flow:
-    1. Upload file → placeholder doc in TurboVec (status="processing")
+    1. Upload file → placeholder points in Qdrant (status="processing")
     2. Background task → chunk & embed → replace placeholder with real
        chunks (status="indexed")
-    3. On error → update placeholder metadata (status="error")
+    3. On error → update placeholder payload (status="error")
 """
 
 import asyncio
@@ -18,7 +18,9 @@ from pathlib import Path
 from typing import ClassVar, Optional
 from uuid import uuid4
 
-from langchain_community.document_loaders import PyMuPDFLoader, TextLoader, WebBaseLoader
+import pymupdf4llm
+
+from langchain_community.document_loaders import TextLoader, WebBaseLoader
 from langchain_core.documents import Document
 
 from src.core.chunker import SmartChunker
@@ -31,9 +33,26 @@ from src.core.youtube import transcribe_youtube_async
 logger = logging.getLogger(__name__)
 
 
+# ── Per-worker cache ─────────────────────────────────────────────────────────
+# FastAPI multi-worker: each Python process keeps its own cached KnowledgeBase.
+# Qdrant handles all server-side concurrency, so no locking is needed.
+_kb_cache: Optional[KnowledgeBase] = None
+_emb_cache = None
+
+
+def _get_shared_kb() -> KnowledgeBase:
+    """Return the per-worker cached KnowledgeBase instance."""
+    global _kb_cache, _emb_cache
+    if _kb_cache is None:
+        settings = get_settings()
+        _emb_cache = EmbeddingFactory.create(settings)
+        _kb_cache = KnowledgeBase(settings, _emb_cache)
+    return _kb_cache
+
+
 class SourceService:
     """
-    Knowledge-base source management — all data lives in TurboVec.
+    Knowledge-base source management — all data lives in Qdrant.
     """
 
     # ── Supported file type sets ──────────────────────────────────────────────
@@ -46,24 +65,17 @@ class SourceService:
     })
 
     def __init__(self):
-        self._kb: Optional[KnowledgeBase] = None
         self._chunker: Optional[SmartChunker] = None
 
     # ── Lazy init ─────────────────────────────────────────────────────────────
 
     def _get_kb(self) -> KnowledgeBase:
-        if self._kb is None:
-            settings = get_settings()
-            emb = EmbeddingFactory.create(settings)
-            self._kb = KnowledgeBase(
-                settings, emb,
-            )
-        return self._kb
+        return _get_shared_kb()
 
     # ── CRUD ──────────────────────────────────────────────────────────────────
 
     def list_sources(self) -> list[dict]:
-        """Return one metadata dict per unique source in TurboVec."""
+        """Return one metadata dict per unique source in Qdrant."""
         sources = self._get_kb().list_sources()
         for src in sources:
             sid = src.get("source_id", "")
@@ -72,7 +84,7 @@ class SourceService:
         return sources
 
     def get_source(self, source_id: str) -> Optional[dict]:
-        """Return source metadata from TurboVec (from the first chunk)."""
+        """Return source metadata from Qdrant (from the first chunk)."""
         meta = self._get_kb().get_source(source_id)
         if meta:
             meta["chunk_count"] = self._get_kb().chunk_count(source_id)
@@ -81,7 +93,7 @@ class SourceService:
 
     def create_placeholder(self, data: dict) -> dict:
         """
-        Create a placeholder TurboVec document with status="processing".
+        Create a placeholder Qdrant point with status="processing".
 
         The placeholder will be replaced by the background ingestion task
         with real chunks once processing completes.
@@ -126,7 +138,7 @@ class SourceService:
         ----------
         override_meta:
             If provided, use this metadata dict *instead* of reading from
-            TurboVec. This avoids races when the placeholder has been
+            Qdrant. This avoids races when the placeholder has been
             updated concurrently by a PUT request.
         """
         kb = self._get_kb()
@@ -144,7 +156,7 @@ class SourceService:
         kb.delete_source(source_id)
 
         # Strip internal fields & mark as indexed
-        for strip_key in ("turbovec_id", "chunk_index", "pending_file_path", "pending_filename"):
+        for strip_key in ("chunk_index", "pending_file_path", "pending_filename"):
             source_meta.pop(strip_key, None)
         source_meta["status"] = "indexed"
         source_meta["error_message"] = ""
@@ -209,13 +221,13 @@ class SourceService:
         return result
 
     def delete_source(self, source_id: str) -> bool:
-        """Delete every chunk with *source_id* from TurboVec."""
+        """Delete every chunk with *source_id* from Qdrant."""
         return self._get_kb().delete_source(source_id)
 
     # ── Stats ─────────────────────────────────────────────────────────────────
 
     def get_stats(self) -> dict:
-        """Aggregate source statistics from TurboVec."""
+        """Aggregate source statistics from Qdrant."""
         kb = self._get_kb()
         sources = kb.list_sources()
         indexed = [s for s in sources if s.get("status") in ("indexed", None)]
@@ -234,12 +246,91 @@ class SourceService:
     # ── File helpers ──────────────────────────────────────────────────────────
 
     @staticmethod
+    def _pdf_to_clean_markdown(path: Path) -> Optional[str]:
+        """
+        Convert a PDF to markdown and strip the reference/bibliography section.
+
+        Academic PDFs contain lengthy reference lists that pollute the embedding
+        space.  This method converts via ``pymupdf4llm`` (which preserves
+        headings, lists, and structure) and trims everything from the first
+        reference heading onward.
+
+        Parameters
+        ----------
+        path:
+            Path to the PDF file.
+
+        Returns
+        -------
+        str or None
+            Clean markdown text with references removed, or ``None`` on error.
+        """
+        import re
+
+        try:
+            import pymupdf
+
+            doc = pymupdf.open(str(path))
+        except Exception as exc:
+            logger.warning("Could not open PDF '%s': %s", path.name, exc)
+            return None
+
+        try:
+            md = pymupdf4llm.to_markdown(
+                doc,
+                header=False,
+                footer=False,
+                page_separators=True,
+                ignore_images=True,
+                write_images=False,
+                image_path=None,
+            )
+        except Exception as exc:
+            logger.warning("Could not convert PDF '%s' to markdown: %s", path.name, exc)
+            doc.close()
+            return None
+
+        doc.close()
+
+        # ── Strip reference / bibliography sections ────────────────────────
+        # Common headings in academic papers
+        ref_patterns = (
+            r'^#{1,3}\s*(?:References|REFERENCES|Bibliography|BIBLIOGRAPHY'
+            r'|Works\s+Cited|WORKS\s+CITED'
+            r'|References\s+and\s+Notes|REFERENCES\s+AND\s+NOTES'
+            r'|Cited\s+References|CITED\s+REFERENCES'
+            r'|References\s+and\s+Further\s+Reading'
+            r'|Reference\s+List|REFERENCE\s+LIST)\s*$'
+        )
+
+        lines = md.split("\n")
+        ref_start = None
+        for i, line in enumerate(lines):
+            if re.match(ref_patterns, line.strip()):
+                ref_start = i
+                break
+
+        if ref_start is not None:
+            md = "\n".join(lines[:ref_start])
+
+        # Clean up surrogate characters that pymupdf4llm can leave behind
+        md = md.encode("utf-8", errors="surrogatepass").decode("utf-8", errors="ignore")
+
+        return md.strip()
+
+    @staticmethod
     def load_file(path: Path) -> Optional[list[Document]]:
         """Load a file into LangChain Documents. Returns None on error."""
         try:
             suffix = path.suffix.lower()
             if suffix == ".pdf":
-                return PyMuPDFLoader(str(path)).load()
+                text = SourceService._pdf_to_clean_markdown(path)
+                if not text:
+                    return None
+                return [Document(
+                    page_content=text,
+                    metadata={"source": str(path), "type": "pdf"},
+                )]
             if suffix in (".txt", ".md", ".rst", ".markdown"):
                 return TextLoader(str(path), encoding="utf-8").load()
         except Exception as exc:
@@ -256,7 +347,9 @@ class SourceService:
     def _get_chunker(self) -> SmartChunker:
         if self._chunker is None:
             settings = get_settings()
-            emb = EmbeddingFactory.create(settings)
+            # Reuse the module-level embedding instance to avoid creating
+            # duplicate API clients.
+            emb = _emb_cache or EmbeddingFactory.create(settings)
             self._chunker = SmartChunker(
                 use_semantic=settings.use_semantic_chunking,
                 embedding_function=emb,

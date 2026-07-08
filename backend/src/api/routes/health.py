@@ -40,5 +40,5 @@ async def readiness(settings: Settings = Depends(get_settings)):
     return {
         "status": "ok",
         "rag_chain_loaded": False,
-        "vectordb_connected": False,
+        "qdrant_connected": False,
     }

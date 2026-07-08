@@ -63,8 +63,8 @@ async def get_profile_generator():
     """
     Dependency that provides a lazily-loaded, cached ProfileGeneratorService.
 
-    The service wraps ``ProfileAugmenter`` which loads the profiles vector
-    store (``vectordb_profiles/``) and its embedding model on first use.
+    The service wraps ``ProfileAugmenter`` which queries the profiles Qdrant
+    collection and loads the embedding model on first use.
 
     Usage:
         async def my_handler(gen = Depends(get_profile_generator)):

@@ -1,7 +1,7 @@
 """
 schemas/source.py — Knowledge-base source documents
 =====================================================
-Metadata plus lightweight status tracking (stored in TurboVec metadata).
+Metadata plus lightweight status tracking (stored in Qdrant payload).
 """
 
 from pydantic import BaseModel, Field
@@ -53,7 +53,7 @@ class SourceUpdateRequest(BaseModel):
 
 
 class SourceResponse(BaseModel):
-    """Source metadata as stored in TurboVec document metadata."""
+    """Source metadata as stored in Qdrant point payload."""
 
     source_id: str = Field(..., alias="id")
     title: str = Field(...)
