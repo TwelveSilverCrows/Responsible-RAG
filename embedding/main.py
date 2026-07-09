@@ -1,4 +1,5 @@
 import logging
+import threading
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -15,10 +16,11 @@ OV_MODEL_PATH = "/models/bge-large-ov"
 DOC_INSTRUCTION = "Represent this document for retrieval: "
 QUERY_INSTRUCTION = "Represent this query for searching relevant passages: "
 
-MAX_BATCH_SIZE = 16  # Process at most 16 texts per request to avoid OOM
+MAX_BATCH_SIZE = 16
 
 model = None
 tokenizer = None
+_model_lock = threading.Lock()  # protects model inference (not thread-safe)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -55,8 +57,9 @@ def _embed_batch(texts: list[str]) -> list[list[float]]:
         max_length=512,
         return_tensors="pt",
     )
-    with torch.no_grad():
-        outputs = model(**encoded)
+    with _model_lock:
+        with torch.no_grad():
+            outputs = model(**encoded)
 
     if isinstance(outputs, tuple):
         last_hidden_state = outputs[0]
