@@ -1,6 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import numpy as np
 import torch
@@ -15,6 +15,8 @@ OV_MODEL_PATH = "/models/bge-large-ov"
 DOC_INSTRUCTION = "Represent this document for retrieval: "
 QUERY_INSTRUCTION = "Represent this query for searching relevant passages: "
 
+MAX_BATCH_SIZE = 16  # Process at most 16 texts per request to avoid OOM
+
 model = None
 tokenizer = None
 
@@ -25,16 +27,15 @@ async def lifespan(app: FastAPI):
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
     
     logger.info(f"Loading OpenVINO INT8 Model from {OV_MODEL_PATH}...")
-    # device="CPU" ensures it uses the Xeon's AVX-512/AMX instructions
     model = OVModelForFeatureExtraction.from_pretrained(
-    OV_MODEL_PATH, 
-    device="CPU",
-    ov_config={
-        "PERFORMANCE_HINT": "THROUGHPUT",
-        "NUM_STREAMS": "4",             # Handle up to 4 concurrent inferences
-        "INFERENCE_NUM_THREADS": "2",
-    }
-)
+        OV_MODEL_PATH, 
+        device="CPU",
+        ov_config={
+            "PERFORMANCE_HINT": "THROUGHPUT",
+            "NUM_STREAMS": "2",
+            "INFERENCE_NUM_THREADS": "2",
+        },
+    )
     logger.info("Model loaded and compiled for Intel Xeon!")
     yield
 
@@ -44,21 +45,9 @@ class EmbedRequest(BaseModel):
     texts: list[str]
     is_query: bool = False
 
-def cls_pooling(last_hidden_state: torch.Tensor) -> np.ndarray:
-    """Extract the [CLS] token (first token) for BGE models."""
-    return last_hidden_state[:, 0, :].cpu().numpy()
 
-def normalize(embeddings: np.ndarray) -> np.ndarray:
-    """L2 normalize the embeddings."""
-    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-    return embeddings / np.maximum(norms, 1e-12)
-
-@app.post("/embed")
-def embed(req: EmbedRequest):
-    instruction = QUERY_INSTRUCTION if req.is_query else DOC_INSTRUCTION
-    texts = [f"{instruction}{t}" for t in req.texts]
-    
-    # Tokenize
+def _embed_batch(texts: list[str]) -> list[list[float]]:
+    """Embed a batch of texts (guaranteed <= MAX_BATCH_SIZE)."""
     encoded = tokenizer(
         texts,
         padding=True,
@@ -66,22 +55,37 @@ def embed(req: EmbedRequest):
         max_length=512,
         return_tensors="pt",
     )
-    
-    # Inference
     with torch.no_grad():
         outputs = model(**encoded)
-        
-    # optimum-intel returns a tuple or object depending on version
+
     if isinstance(outputs, tuple):
         last_hidden_state = outputs[0]
     else:
         last_hidden_state = outputs.last_hidden_state
 
-    # Pool & Normalize
-    embeddings = cls_pooling(last_hidden_state)
-    embeddings = normalize(embeddings)
-    
-    return {"embeddings": embeddings.tolist()}
+    # CLS pooling + L2 normalize
+    embeddings = last_hidden_state[:, 0, :].cpu().numpy()
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    embeddings = embeddings / np.maximum(norms, 1e-12)
+    return embeddings.tolist()
+
+
+@app.post("/embed")
+def embed(req: EmbedRequest):
+    if len(req.texts) == 0:
+        raise HTTPException(400, "texts must not be empty")
+
+    instruction = QUERY_INSTRUCTION if req.is_query else DOC_INSTRUCTION
+    prefixed = [f"{instruction}{t}" for t in req.texts]
+
+    # Process in sub-batches to avoid OOM on long documents
+    all_embeddings: list[list[float]] = []
+    for i in range(0, len(prefixed), MAX_BATCH_SIZE):
+        batch = prefixed[i : i + MAX_BATCH_SIZE]
+        all_embeddings.extend(_embed_batch(batch))
+
+    return {"embeddings": all_embeddings}
+
 
 @app.get("/health")
 def health():
