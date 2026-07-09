@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-large-en-v1.5"
     huggingfacehub_api_token: str = ""     # hf_… token with inference permission
 
+    # ── Embedding provider ────────────────────────────────────────────────────
+    # "openvino" → uses a local OpenVINO embedding server (self-hosted)
+    # "huggingface" → uses Hugging Face Inference API (requires token)
+    embedding_provider: str = "openvino"
+    local_embedding_url: str = ""   # MUST be set in .env when using openvino
+
     # ── Auth ───────────────────────────────────────────────────────────────
     auth_secret_key: str = "dev-secret-change-in-production-0123456789"
     auth_algorithm: str = "HS256"
