@@ -31,9 +31,8 @@ async def lifespan(app: FastAPI):
     device="CPU",
     ov_config={
         "PERFORMANCE_HINT": "THROUGHPUT",
-        "NUM_STREAMS": "2",             # ⬅️ Changed from "1" to "2" (One stream per vCPU)
-        "INFERENCE_NUM_THREADS": "2",   # ⬅️ Changed from "1" to "2"
-        "ENABLE_CPU_PINNING": "YES",    
+        "NUM_STREAMS": "4",             # Handle up to 4 concurrent inferences
+        "INFERENCE_NUM_THREADS": "2",
     }
 )
     logger.info("Model loaded and compiled for Intel Xeon!")
@@ -55,7 +54,7 @@ def normalize(embeddings: np.ndarray) -> np.ndarray:
     return embeddings / np.maximum(norms, 1e-12)
 
 @app.post("/embed")
-async def embed(req: EmbedRequest):
+def embed(req: EmbedRequest):
     instruction = QUERY_INSTRUCTION if req.is_query else DOC_INSTRUCTION
     texts = [f"{instruction}{t}" for t in req.texts]
     
@@ -85,5 +84,5 @@ async def embed(req: EmbedRequest):
     return {"embeddings": embeddings.tolist()}
 
 @app.get("/health")
-async def health():
+def health():
     return {"status": "ok", "backend": "openvino", "model": MODEL_ID}
