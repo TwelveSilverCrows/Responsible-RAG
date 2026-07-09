@@ -103,16 +103,20 @@ class TEIEmbeddings(Embeddings):
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
+        # TEI rejects empty strings — replace them so we don't get 400 errors
+        cleaned = [t if t.strip() else "." for t in texts]
         # Split into sub-batches of 32 to avoid TEI's batch size limit
         batch_size = 32
         all_embeddings: list[list[float]] = []
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
+        for i in range(0, len(cleaned), batch_size):
+            batch = cleaned[i : i + batch_size]
             all_embeddings.extend(self._call({"inputs": batch, "normalize": True}))
         return all_embeddings
 
     def embed_query(self, text: str) -> list[float]:
-        # TEI always returns [[float]] — unwrap the single result
+        # TEI rejects empty strings
+        if not text or not text.strip():
+            text = "."
         return self._call({"inputs": text, "normalize": True})[0]
 
 
