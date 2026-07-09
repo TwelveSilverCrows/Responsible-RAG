@@ -37,10 +37,10 @@ class Settings(BaseSettings):
     huggingfacehub_api_token: str = ""     # hf_… token with inference permission
 
     # ── Embedding provider ────────────────────────────────────────────────────
-    # "openvino" → uses a local OpenVINO embedding server (self-hosted)
+    # "tei" → uses Hugging Face Text Embeddings Inference server (default)
     # "huggingface" → uses Hugging Face Inference API (requires token)
-    embedding_provider: str = "openvino"
-    local_embedding_url: str = ""   # MUST be set in .env when using openvino
+    embedding_provider: str = "tei"
+    local_embedding_url: str = ""   # MUST be set in .env when using tei
 
     # ── Auth ───────────────────────────────────────────────────────────────
     auth_secret_key: str = "dev-secret-change-in-production-0123456789"

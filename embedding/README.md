@@ -1,26 +1,48 @@
-## Quick Start (uv)
+# Text Embeddings Inference (TEI) — CPU server
+
+This directory holds the configuration for the **Hugging Face Text Embeddings Inference (TEI)** server that powers the RAG chatbot's embedding backend.
+
+## Quick start
 
 ```bash
-# Install dependencies
-uv sync
-
-# Activate the environment
-.venv\Scripts\activate  # Windows
-# source .venv/bin/activate  # Linux/macOS
-
-# Run the server (model must be exported first — see Dockerfile)
-uvicorn main:app --host 0.0.0.0 --port 8080 --workers 1
+docker run -d --restart always \
+  --name tei-embedder \
+  --cpus 2 \
+  -p 8080:80 \
+  -v $PWD/data:/data \
+  ghcr.io/huggingface/text-embeddings-inference:cpu-latest \
+  --model-id BAAI/bge-large-en-v1.5 \
+  --max-client-batch-size 128 \
+  --max-concurrent-requests 64
 ```
 
-## Docker Build (recommended for production)
+This starts the TEI server on port **8080** using the same `BAAI/bge-large-en-v1.5` model used by the rest of the project.
 
-The model is exported to INT8 during the Docker build — this shrinks it from
-~1.3 GB (FP32) to ~350 MB and pre-compiles it for instant startup.
+## API
 
-```bash
-# Build the image (The model export will take ~2-3 minutes during build)
-docker build -t bge-openvino-xeon .
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check (returns `200 OK` with no body) |
+| `/embed` | POST | Returns normalized embeddings |
 
-# Run it
-docker run -d --name bge-xeon --restart always -p 8080:8080 bge-openvino-xeon
+### Embed request
+
+```json
+{"inputs": "text to embed", "normalize": true}
+{"inputs": ["text1", "text2"], "normalize": true}
 ```
+
+### Embed response
+
+TEI returns raw `[[float]]` — a list of embedding vectors.
+
+## Configuration
+
+The backend connects to TEI via the `.env` variables:
+
+```
+EMBEDDING_PROVIDER=tei
+LOCAL_EMBEDDING_URL=http://<server-address>:8080/embed
+```
+
+See `example.env` at the project root for details.

@@ -3,20 +3,12 @@
 build_profiles_kb.py — Build a dedicated vector store for profile generation
 ==============================================================================
 Ingests PDFs and web links from ``resources/profiles/`` into a Qdrant
-collection (``rag_profiles_collection``) using local OpenVINO GPU-accelerated
-embeddings (BAAI/bge-large-en-v1.5).
+collection (``rag_profiles_collection``) using the TEI embedding server
+(BAAI/bge-large-en-v1.5).
 
 Usage
 -----
-    # 1. Install OpenVINO extras (one-time)
-    pip install -e ".[openvino]"
-
-    # 2. Run the script
     uv run python scripts/build_profiles_kb.py
-
-    # 3. Re-run anytime you add/change files in resources/profiles/
-
-    # 3. Re-run anytime you add/change files in resources/profiles/
 
 What it does
 ------------
@@ -26,7 +18,7 @@ What it does
    BeautifulSoup, along with visible metadata.
 3. **Chunking** — uses the project's ``SmartChunker`` (semantic → recursive
    fallback).
-4. **Embeddings** — ``OpenVINOBgeEmbeddings`` with GPU device (Intel GPU).
+4. **Embeddings** — TEI server (BAAI/bge-large-en-v1.5).
 5. **Storage** — all chunks + metadata upserted into a Qdrant collection.
 """
 
@@ -273,45 +265,23 @@ def fetch_webpage_docs(url: str, timeout: int = 15) -> Optional[list]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Embedding factory (local OpenVINO GPU)
+# Embedding factory (TEI server)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def create_embeddings(device: str = "GPU"):
-    """
-    Create a **local** OpenVINO BGE embedding model running on the
-    specified device (GPU by default).  No remote API calls.
+def create_embeddings():
+    """Create a TEI embedding client pointing at the remote server."""
+    sys.path.insert(0, str(PROJECT_ROOT / "backend"))
+    from src.core.config import get_settings
+    from src.core.embeddings import TEIEmbeddings
 
-    The model is downloaded from Hugging Face Hub on first run and
-    cached locally in ``~/.cache/huggingface/``.
-    """
-    try:
-        from langchain_community.embeddings import OpenVINOBgeEmbeddings
-    except ImportError:
-        print(
-            "[ERROR] OpenVINO dependencies not installed.\n"
-            "   Run:  pip install -e '.[openvino]'"
-        )
+    settings = get_settings()
+    url = settings.local_embedding_url
+    if not url:
+        print("[ERROR] LOCAL_EMBEDDING_URL is not set in .env")
         sys.exit(1)
 
-    logger.info(
-        "Loading BAAI/bge-large-en-v1.5 via OpenVINO (device=%s) ...", device,
-    )
-    logger.info("  (First run compiles the model — may take a minute)")
-
-    t0 = time.time()
-    embeddings = OpenVINOBgeEmbeddings(
-        model_name_or_path=EMBEDDING_MODEL,
-        model_kwargs={"device": device},
-        encode_kwargs={
-            "normalize_embeddings": True,
-            "batch_size": 8,
-        },
-        query_instruction="Represent this query for searching relevant passages: ",
-        embed_instruction="Represent this document for retrieval: ",
-    )
-    elapsed = time.time() - t0
-    logger.info("OpenVINO embedding model ready (%.1f s)", elapsed)
-    return embeddings
+    logger.info("Using TEI server (url=%s)", url)
+    return TEIEmbeddings(api_url=url)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -541,7 +511,7 @@ def main():
     logger.info("=" * 60)
 
     # ── 1. Embeddings ─────────────────────────────────────────────────────────
-    embeddings = create_embeddings(device=args.device)
+    embeddings = create_embeddings()
 
     # ── 2. Chunker ────────────────────────────────────────────────────────────
     from src.core.chunker import SmartChunker

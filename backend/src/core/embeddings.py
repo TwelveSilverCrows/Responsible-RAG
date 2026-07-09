@@ -14,6 +14,7 @@ Usage
 
 import logging
 import math
+import threading
 
 import httpx
 from langchain_core.embeddings import Embeddings
@@ -56,31 +57,64 @@ def validate_embeddings(
                     f"embedding[{i}] has {len(emb)} dimensions, expected {expected_dim}"
                 )
 
-class OpenVINOEmbeddings(Embeddings):
-    """Calls the local OpenVINO server optimized for Intel Xeon."""
-    
-    def __init__(self, api_url: str) -> None:
+class TEIEmbeddings(Embeddings):
+    """Calls Hugging Face Text Embeddings Inference (TEI) server.
+
+    - Limits concurrent requests to avoid overwhelming the server
+    - Retries on 429 rate-limits with exponential backoff
+    """
+
+    def __init__(
+        self,
+        api_url: str,
+        max_concurrency: int = 2,
+        max_retries: int = 8,
+    ) -> None:
         self.api_url = api_url
+        self.max_retries = max_retries
+        self._semaphore = threading.Semaphore(max_concurrency)
+
+    def _call(self, payload: dict) -> list | list[list]:
+        """POST to TEI with concurrency limiting and retry on 429."""
+        import random as _random
+        import time as _time
+
+        with self._semaphore:
+            for attempt in range(self.max_retries):
+                resp = httpx.post(
+                    self.api_url,
+                    json=payload,
+                    timeout=300.0,
+                )
+                if resp.status_code == 429 and attempt < self.max_retries - 1:
+                    base = 2 ** attempt
+                    jitter = _random.uniform(0, base)
+                    wait = base + jitter
+                    logger.warning(
+                        "TEI rate-limited (429), retrying in %.1fs (attempt %d/%d)",
+                        wait, attempt + 1, self.max_retries,
+                    )
+                    _time.sleep(wait)
+                    continue
+                resp.raise_for_status()
+                return resp.json()
+        raise RuntimeError("TEI request failed after max retries")
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        if not texts: return []
-        resp = httpx.post(
-            self.api_url, 
-            json={"texts": texts, "is_query": False}, 
-            timeout=60.0 
-        )
-        resp.raise_for_status()
-        return resp.json()["embeddings"]
+        if not texts:
+            return []
+        # Split into sub-batches of 32 to avoid TEI's batch size limit
+        batch_size = 32
+        all_embeddings: list[list[float]] = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            all_embeddings.extend(self._call({"inputs": batch, "normalize": True}))
+        return all_embeddings
 
     def embed_query(self, text: str) -> list[float]:
-        resp = httpx.post(
-            self.api_url, 
-            json={"texts": [text], "is_query": True}, 
-            timeout=60.0 
-        )
-        resp.raise_for_status()
-        return resp.json()["embeddings"][0]
-    
+        # TEI always returns [[float]] — unwrap the single result
+        return self._call({"inputs": text, "normalize": True})[0]
+
 
 class HFInferenceEmbeddings(Embeddings):
     """Lightweight Hugging Face Inference API client for feature extraction.
@@ -130,19 +164,19 @@ class HFInferenceEmbeddings(Embeddings):
 
 
 class EmbeddingFactory:
-    """Creates an embedding client from settings (OpenVINO or HF Inference API)."""
+    """Creates an embedding client from settings (TEI or HF Inference API)."""
 
     @staticmethod
     def create(settings: Settings) -> Embeddings:
         provider = settings.embedding_provider
-        if provider == "openvino":
+        if provider == "tei":
             url = settings.local_embedding_url
             if not url:
                 raise RuntimeError(
                     "LOCAL_EMBEDDING_URL is not set. Add it to your .env file."
                 )
-            logger.info("Using OpenVINO server (url=%s)", url)
-            return OpenVINOEmbeddings(api_url=url)
+            logger.info("Using TEI server (url=%s)", url)
+            return TEIEmbeddings(api_url=url)
 
         # Fallback: Hugging Face Inference API
         token = settings.huggingfacehub_api_token
