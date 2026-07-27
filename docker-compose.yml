@@ -67,10 +67,17 @@ services:
     volumes:
       # Host-backed persistence: data survives container restarts & rebuilds
       - ../storage/mongo/data:/data/db
-      # Init script creates the app user + database on first run
+      # Init script creates the app user + database on first run (empty DB only)
       - ../storage/mongo/init.js:/docker-entrypoint-initdb.d/init.js:ro
+      # Entrypoint wrapper handles rough restores (copied WiredTiger files)
+      - ../storage/mongo/entrypoint-wrapper.sh:/entrypoint-wrapper.sh:ro
+    entrypoint: ["/bin/bash", "/entrypoint-wrapper.sh"]
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD", "mongosh", "--quiet",
+             "--username", "${MONGO_APP_USER:-rag}",
+             "--password", "${MONGO_APP_PASSWORD:-ragpassword}",
+             "--authenticationDatabase", "${MONGO_DB:-responsible_rag}",
+             "--eval", "db.runCommand({ping:1})"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -114,9 +121,10 @@ services:
       # Docker frontend serves on port 3000 (dev) or behind Caddy (prod)
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       # Point to the local Docker MongoDB service
-      # authSource=admin uses the root admin user created automatically by
-      # MONGO_INITDB_ROOT_USERNAME/PASSWORD (always exists).
-      MONGO_URI: ${MONGO_URI:-mongodb://rag:ragpassword@mongo:27017/responsible_rag?authSource=admin}
+      # Default auth: authenticates against the target database
+      # (responsible_rag). No authSource needed — the user must exist
+      # in the target DB (created by init.js on first run).
+      MONGO_URI: ${MONGO_URI:-mongodb://rag:ragpassword@mongo:27017/responsible_rag}
       # Point to the Docker Qdrant service
       QDRANT_HOST: qdrant
       QDRANT_PORT: "6333"

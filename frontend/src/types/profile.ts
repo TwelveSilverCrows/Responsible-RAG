@@ -79,3 +79,20 @@ export const LANGUAGE_OPTIONS = [
   'Arabic', 'Tagalog', 'Hindi', 'Urdu', 'Portuguese', 'German',
   'Italian', 'Vietnamese', 'Korean', 'Russian', 'Japanese', 'Other',
 ];
+
+export const GENDER_OPTIONS: { value: string; label: string }[] = [
+  { value: 'Man', label: 'Man' },
+  { value: 'Woman', label: 'Woman' },
+  { value: 'Non-binary', label: 'Non-binary' },
+  { value: 'Genderqueer', label: 'Genderqueer' },
+  { value: 'Two-Spirit', label: 'Two-Spirit' },
+  { value: 'Prefer not to say', label: 'Prefer not to say' },
+];
+
+export const COMFORT_LABELS: Record<number, string> = {
+  1: 'Not comfortable',
+  2: 'Slightly comfortable',
+  3: 'Somewhat comfortable',
+  4: 'Comfortable',
+  5: 'Very comfortable',
+};
