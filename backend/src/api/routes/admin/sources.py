@@ -72,7 +72,7 @@ def _meta_to_response(meta: dict) -> SourceResponse:
 @router.get("", response_model=SourceListResponse)
 def list_sources(
     page: int = 1,
-    limit: int = 20,
+    limit: int = 70,
     admin: dict = Depends(require_admin),
 ):
     """List all knowledge-base sources (from Qdrant payload).
@@ -199,7 +199,7 @@ def _process_upload(
 ) -> None:
     """
     Background task: save to temp → process (load/transcribe + chunk)
-    → finalize source in Qdrant.
+    → finalize source in Qdrant.   
 
     Uses ``SourceService.process_file`` for all file types (text, PDF, audio).
     Runs outside the request-response cycle.
