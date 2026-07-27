@@ -13,9 +13,26 @@ Usage
     print(cfg.llm_model)
 """
 
+import os
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _is_running_in_docker() -> bool:
+    """Return True when the process is running inside a Docker container."""
+    return os.path.exists("/.dockerenv")
+
+
+def _normalize_mongo_uri(uri: str) -> str:
+    """Use the Compose MongoDB service name inside Docker containers."""
+    if not uri:
+        return uri
+    if not _is_running_in_docker():
+        return uri
+    if "localhost" in uri or "127.0.0.1" in uri:
+        return uri.replace("localhost", "mongo").replace("127.0.0.1", "mongo")
+    return uri
 
 
 class Settings(BaseSettings):
@@ -109,6 +126,10 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",          # Silently ignore unknown env vars
     )
+
+    def model_post_init(self, __context) -> None:
+        """Normalize database hostnames for containerized deployments."""
+        self.mongo_uri = _normalize_mongo_uri(self.mongo_uri)
 
 
 @lru_cache(maxsize=1)

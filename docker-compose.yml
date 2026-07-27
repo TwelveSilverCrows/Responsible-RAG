@@ -113,10 +113,10 @@ services:
     environment:
       # Docker frontend serves on port 3000 (dev) or behind Caddy (prod)
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
-      # Point to the local Docker MongoDB service
-      # authSource=admin uses the root admin user created automatically by
-      # MONGO_INITDB_ROOT_USERNAME/PASSWORD (always exists).
-      MONGO_URI: ${MONGO_URI:-mongodb://rag:ragpassword@mongo:27017/responsible_rag?authSource=admin}
+      # Point to the local Docker MongoDB service.
+      # Use a dedicated compose override so a local MONGO_URI from .env does not
+      # accidentally target localhost inside the backend container.
+      MONGO_URI: ${MONGO_URI_DOCKER:-mongodb://rag:ragpassword@mongo:27017/responsible_rag?authSource=admin}
       # Point to the Docker Qdrant service
       QDRANT_HOST: qdrant
       QDRANT_PORT: "6333"
