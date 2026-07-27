@@ -72,7 +72,7 @@ def _meta_to_response(meta: dict) -> SourceResponse:
 @router.get("", response_model=SourceListResponse)
 def list_sources(
     page: int = 1,
-    limit: int = 70,
+    limit: int = 100,
     admin: dict = Depends(require_admin),
 ):
     """List all knowledge-base sources (from Qdrant payload).
