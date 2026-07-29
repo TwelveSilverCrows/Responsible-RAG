@@ -96,6 +96,39 @@ def _build_memory_context(memory:dict, recent_turns: list[dict])-> str:
         pieces.append(f"Recent conversation:\n" + recent_turns_text)
 
     return "\n\n".join(pieces)
+
+def _extract_memory_facts(memory: dict, user_question: str, assistant_answer: str) -> list[str]:
+    # Minimal first version: keep previous facts, add any new obvious fact
+    memory_facts = memory.get("facts", [])
+    #TODO: Implement a more sophisticated fact extraction from the user question and assistant answer
+    return memory_facts
+
+def _update_memory(memory:dict, user_question:str, assistant_answer:str, recent_turns:list[dict], now:str) -> dict:
+    """Update the memory document with new summary, facts, and recent turns."""
+    # Extract facts from the user question and assistant answer
+    new_facts = _extract_memory_facts(memory, user_question, assistant_answer)
+    updated_facts = list(set(memory.get("facts", []) + new_facts))  # Deduplicate to conserve memory
+
+    # Update recent turns
+    updated_recent_turns = recent_turns[-10:]  # Keep only the last 10 turns
+
+    # Update summary 
+    #TODO: Implement a more sophisticated summary update, possibly using an LLM to summarise the conversation so far
+    if memory.get("summary"):
+        updated_summary = memory.get("summary", "") + f"\nUser: {user_question}\nAssistant: {assistant_answer}"
+    else:
+        updated_summary = f"User: {user_question}\nAssistant: {assistant_answer}" # have to set the summary to something to break out of the empty state
+
+    return {
+        "enabled": memory.get("enabled", True),
+        "summary": updated_summary.strip(),
+        "facts": updated_facts,
+        "recent_turns": updated_recent_turns,
+        "last_refreshed_at": now,
+        "last_refreshed_turn_count": len(updated_recent_turns),
+    }
+
+
 ###############
 
 
@@ -241,15 +274,6 @@ async def chat(
     # Build personalised profile prompt from stored user profile
     group_prompt = _build_profile_prompt(db, generator, current_user, body.question)
 
-    """
-    Load existing conversation document if conversation_id exists.
-    Ensure memory is present on new or existing conversation.
-    Fetch recent turns from messages.
-    Build memory_context.
-    Pass it to chain.invoke(...).
-    After assistant response, update conversation memory.
-
-    """
     # Get or create conversation
     conv_id = body.conversation_id
     user_id = current_user["sub"]
@@ -267,12 +291,7 @@ async def chat(
             "updated_at": now,
             # Initialising memory structure for the conversation
             "memory": {
-                "enabled": True,
-                "summary":"",
-                "facts":[],
-                "recent_turns": [],
-                "last_refreshed_at":now,
-                "last_refreshed_turn_count":0,
+                _init_memory_doc(now)
             },
         }
         if db is not None:
@@ -293,10 +312,15 @@ async def chat(
             "created_at": now,
         })
 
-    # Invoke RAG
-    result = chain.invoke(body.question, group_prompt)
+    #Build memory before invoking
+    conv_memory  = conv_doc.get("memory") or _init_memory_doc(now) #failsafe
+    recent_turns = _fetch_recent_turns(db, conv_id, limit=5) if db is not None else []
+    memory_context = _build_memory_context(conv_memory, recent_turns)
 
-    citations = [
+    # Invoke RAG
+    result = chain.invoke(body.question, group_prompt, memory_context)
+
+    citations = [_con
         CitationSchema(
             id=f"cit-{i}",
             source_id=src.get("source_id", ""),
