@@ -58,8 +58,49 @@ def _msg_to_response(doc: dict) -> dict:
         "created_at": doc.get("created_at", ""),
     }
 
+############ Helper functions for chat memory
+def _init_memory_doc(now: str) -> dict:
+    return {
+        "enabled": True,
+        "summary": "",
+        "facts": [],
+        "recent_turns": [],
+        "last_refreshed_at": now,
+        "last_refreshed_turn_count": 0,
+    }
+
+def _fetch_recent_turns(db, conversation_id: str, limit: int = 5) -> list[dict]:
+    """Fetch the most recent turns (user + assistant messages) for a conversation."""
+    cursor = db["messages"].find({"conversation_id": conversation_id})
+    cursor = cursor.sort("created_at", -1).limit(limit * 2)  # Fetch more to account for both roles
+    turns = [{"role": m["role"], "content": m["content"], "created_at": m["created_at"]} for m in cursor]
+    return list (reversed(turns))  # Return in chronological order, turns is a stack of messages, so we reverse it to get the correct order
+
+def _build_memory_context(memory:dict, recent_turns: list[dict])-> str:
+    """Build a context string from the memory summary, facts, and recent turns."""
+    if not memory or not memory.get("enabled", True):
+        return ""
+
+    summary = memory.get("summary", "").strip()
+    facts = memory.get("facts", [])
+    recent_turns_text = "\n".join(
+        f"{turn['role'].title()}: {turn['content']}"
+        for turn in recent_turns
+    )
+    pieces = []
+    if summary:
+        pieces.append(f"Summary of conversation so far:\n{summary}")
+    if facts:
+        pieces.append(f"Facts:\n" + "\n".join(f"- {fact}" for fact in facts))
+    if recent_turns_text:
+        pieces.append(f"Recent conversation:\n" + recent_turns_text)
+
+    return "\n\n".join(pieces)
+###############
+
 
 # ── Conversations ─────────────────────────────────────────────────────────────
+
 
 @router.get("/conversations")
 async def list_conversations(
@@ -200,6 +241,15 @@ async def chat(
     # Build personalised profile prompt from stored user profile
     group_prompt = _build_profile_prompt(db, generator, current_user, body.question)
 
+    """
+    Load existing conversation document if conversation_id exists.
+    Ensure memory is present on new or existing conversation.
+    Fetch recent turns from messages.
+    Build memory_context.
+    Pass it to chain.invoke(...).
+    After assistant response, update conversation memory.
+
+    """
     # Get or create conversation
     conv_id = body.conversation_id
     user_id = current_user["sub"]
@@ -215,6 +265,15 @@ async def chat(
             "last_message_at": None,
             "created_at": now,
             "updated_at": now,
+            # Initialising memory structure for the conversation
+            "memory": {
+                "enabled": True,
+                "summary":"",
+                "facts":[],
+                "recent_turns": [],
+                "last_refreshed_at":now,
+                "last_refreshed_turn_count":0,
+            },
         }
         if db is not None:
             result = db["conversations"].insert_one(conv_doc)
