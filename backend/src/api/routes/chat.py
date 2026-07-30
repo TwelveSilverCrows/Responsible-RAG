@@ -14,13 +14,18 @@ from src.api.deps import get_rag_chain, get_profile_generator
 
 #memory helper functions import
 from src.core.memory import (
-    _build_memory_context,
-    _init_memory_doc,
-    _update_memory,
-    _fetch_recent_turns
+    MemoryAgent,
+    build_memory_context,
+    init_memory,
+    update_memory,
+    should_update_memory,
+    fetch_recent_turns
 )
 
 router = APIRouter()
+
+#used for updating short and long term memory for chats
+memory_agent = MemoryAgent()
 
 
 def _get_db():
@@ -224,15 +229,18 @@ async def chat(
             "created_at": now,
             "updated_at": now,
             # Initialising memory structure for the conversation
-            "memory": {
-                _init_memory_doc(now)
-            },
+            "memory": init_memory(now),
         }
         if db is not None:
             result = db["conversations"].insert_one(conv_doc)
             conv_id = str(result.inserted_id)
         else:
             conv_id = f"conv-{uuid4().hex[:12]}"
+    else:
+        #if memory not in block, intialise it
+        if "memory" not in conv_doc:
+            conv_doc["memory"] = init_memory(now)
+
 
     # Store user message
     msg_id = f"msg-{uuid4().hex[:12]}"
@@ -247,14 +255,14 @@ async def chat(
         })
 
     #Build memory before invoking
-    conv_memory  = conv_doc.get("memory") or _init_memory_doc(now) #failsafe
-    recent_turns = _fetch_recent_turns(db, conv_id, limit=5) if db is not None else []
-    memory_context = _build_memory_context(conv_memory, recent_turns)
+    conv_memory  = conv_doc.get("memory") or init_memory(now) #failsafe
+    recent_turns = fetch_recent_turns(db, conv_id, limit=5) if db is not None else []
+    memory_context = build_memory_context(conv_memory, recent_turns)
 
     # Invoke RAG
     result = chain.invoke(body.question, group_prompt, memory_context)
 
-    citations = [_con
+    citations = [
         CitationSchema(
             id=f"cit-{i}",
             source_id=src.get("source_id", ""),
@@ -287,14 +295,20 @@ async def chat(
         })
 
 
-        # Update memory after response
-        updated_memory = _update_memory(conv_memory, 
-                                        body.question, 
-                                        result.answer, recent_turns + [{"role":"user", "content": body.question, "created_at": now}, {"role": "assistant", "content":result.answer, "created_at": _now()}], 
-                                        body.question, 
-                                        result.answer, 
-                                        _now())
+        recent_turns = fetch_recent_turns(db, conv_id, limit=8)
 
+        if should_update_memory(conv_memory, recent_turns):
+            updated_memory = update_memory(
+                conv_memory,
+                body.question,
+                result.answer,
+                recent_turns,
+                _now(),
+                memory_agent,
+            )
+        else:
+            updated_memory = conv_memory
+    
         db["conversations"].update_one(
             {"_id": ObjectId(conv_id) if ObjectId.is_valid(conv_id) else conv_id},
             {"$set": {
@@ -443,4 +457,3 @@ _PROFILE_KEY_MAP: dict[str, str] = {
     "disabled": "MIDAGED_DISABLED_CANADIAN",
     "full": "SENIOR_LOW_EDU_CANADA",       # fallback for "full" privacy mode
 }
-

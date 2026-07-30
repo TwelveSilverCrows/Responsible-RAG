@@ -1,11 +1,111 @@
 """ Memory helper module for RAGChain. """
+from __future__ import annotations
 
+import json
+import re
+from operator import itemgetter
 from typing import Any
+
+from langchain.chat_models import init_chat_model
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+
+from src.core.config import get_settings
 
 DEFAULT_RECENT_TURNS = 8
 MAX_FACTS = 10
+_REFRESH_EVERY = 4
 
-def _init_memory_doc(now: str) -> dict[str, Any]:
+_SUMMARY_PROMPT = ChatPromptTemplate.from_template(
+    "You are a memory assistant that updates a concise session summary based "
+    "on the user's conversation history. The summary should capture the user's "
+    "goals, preferences, topics, and any stated health or disability details."
+    "\n\nExisting summary:\n{existing_summary}\n\n"
+    "Recent conversation:\n{recent_turns}\n\n"
+    "Produce a short summary in 2-3 sentences. If the existing summary already "
+    "captures the context, preserve it and only add new, relevant details."
+)
+
+_FACTS_PROMPT = ChatPromptTemplate.from_template(
+    "You are a memory assistant that extracts explicit user facts from the "
+    "conversation history. Only include user statements; do not include assistant text. "
+    "Return a JSON array of strings only, with each string in one of these canonical forms: "
+    "\"Health condition: ...\" , \"Disability: ...\" , \"Location: ...\" , \"Preference: ...\" , \"Goal: ...\" , \"Topic: ...\" .\n\n"
+    "Conversation:\n{recent_turns}\n\n"
+    "If there are no extractable facts, return an empty array: []."
+)
+
+
+class MemoryAgent:
+    #helps initialise, update and generate summaries and facts from chat transcripts
+
+
+    def __init__(self) -> None:
+        self._settings = get_settings()
+        self._llm = None
+        self._summary_chain = None
+        self._facts_chain = None
+
+    def _get_llm(self):
+        """ This function initialises the chat model for memory purposes."""
+        if self.llm is None:
+            self.llm = init_chat_model(
+                model = self._settings.llm_model,
+                temperature = self._settings.llm_temperature,
+            )
+        return self.llm
+
+    def _get_summary_chain(self):
+        """
+        This function initialises the summary chain.
+        Summaries of chat transcripts enable short-term memory.
+        """
+        if self._summary_chain is None:
+            #itemgetter used for efficiency
+            self._summary_chain = (
+                {
+                    "existing_summary": itemgetter("existing_summary"),
+                    "recent_turns": itemgetter("recent_turns")
+                }
+                | _SUMMARY_PROMPT
+                | self._get_llm()
+                | StrOutputParser()
+            )
+        return self._summary_chain
+
+    def _get_facts_chain(self):
+        """ 
+        This functions intialises facts chain.
+        Fact extraction enables long-term memory.
+        """
+        if self._facts_chain is None:
+            self.facts_chain = (
+                {"recent_turns": itemgetter("recent_turns")}
+                |_FACTS_PROMPT
+                |self._get_llm()
+                |StrOutputParser()
+            )
+        return self._facts_chain
+
+    def _update_summary(self, existing_summary: str, recent_turns:str) -> str:
+        """Update the summary with the latest question and answer."""
+        if not recent_turns.strip():
+            return existing_summary.strip()
+        summary = self._get_summary_chain().invoke(
+            {"existing_summary": existing_summary or "", "recent_turns": recent_turns}
+        )
+        return summary.strip()
+
+    def _extract_memory_facts(self, recent_turns:str) -> list[str]:
+        """Extraction of facts from chats enables long-term memory about the user's goals, relevant medical conditions, etc."""
+        if not recent_turns.strip():
+            return []
+        raw = self._get_facts_chain().invoke({"recent_turns": recent_turns})
+        return format_facts(parse_json_array(raw))
+
+############## Helper functions
+
+def init_memory(now: str) -> dict[str, Any]:
     """Initialise a new memory document with default values."""
     return {
         "enabled": True,
@@ -20,82 +120,149 @@ def trim_recent_turns(recent_turns: list[dict[str, str]], limit: int = DEFAULT_R
     """Trim the recent turns list to the specified limit."""
     return recent_turns[-limit:]
 
+def format_recent_turns(recent_turns: list[dict[str,str]])->str:
+    """
+    Helper function: adds new line between turns in chat.
+    """
+    return "\n".join(
+        f"{turn['role'].title()}:{turn['content']}"
+        for turn in recent_turns
+    )
 
-def _build_memory_context(memory:dict, recent_turns: list[dict])-> str:
+def build_memory_context(memory:dict[str,Any], recent_turns: list[dict[str,str]]) -> str:
     """Build a context string from the memory summary, facts, and recent turns."""
+
     if not memory or not memory.get("enabled", True):
         return ""
 
-    summary = memory.get("summary", "").strip()
-    facts = memory.get("facts", [])
-    recent_turns_text = "\n".join(
-        f"{turn['role'].title()}: {turn['content']}"
-        for turn in recent_turns
-    )
     pieces = []
+
+    summary = memory.get("summary", "").strip()
     if summary:
-        pieces.append(f"Summary of conversation so far:\n{summary}")
+        pieces.append(f"Summary:\n{summary}")
+
+    facts = [fact.strip() for fact in memory.get("facts", []) if fact and fact.strip()]
     if facts:
         pieces.append(f"Facts:\n" + "\n".join(f"- {fact}" for fact in facts))
-    if recent_turns_text:
-        pieces.append(f"Recent conversation:\n" + recent_turns_text)
+
+    recent_text = format_recent_turns(recent_turns)
+    if recent_text:
+        pieces.append(f"Recent conversation:\n" + recent_text)
 
     return "\n\n".join(pieces)
 
-def _update_memory_facts(
-    current_facts: list[str],
-    user_question: str,
-    assistant_answer: str,
-) -> list[str]:
-    facts = list(dict.fromkeys(current_facts))
-    lower = user_question.lower()
+def should_update_memory(memory:dict[str,Any], recent_turns: list[dict[str, str]]) -> bool:
+    """
+    Returns a bool that indicates if enough turns have passed to update memory.
+    Should reduce latency and token usage, hopefully.
+    """
+    if not recent_turns:
+        return False
 
-    if "student loan" in lower and not any("student loan" in fact.lower() for fact in facts):
-        facts.append("Topic: Canadian student loans")
+    turn_count = len(recent_turns)
+    last_refreshed_turn_count = memory.get("last_refreshed_turn_count", 0)
 
-    if "concise" in lower or "short" in lower:
-        if not any("concise" in fact.lower() for fact in facts):
-            facts.append("Prefers concise explanations")
+    #Always refresh once if there is no summary
+    if not memory.get("summary", "").strip():
+        return True
 
-    # Keep the list bounded
-    return facts[-MAX_FACTS:]
+    #refresh every N turns
+    return (turn_count - last_refreshed_turn_count) >= _REFRESH_EVERY
 
 
-def _update_memory(memory:dict, user_question:str, assistant_answer:str, recent_turns:list[dict], now:str) -> dict:
+
+
+def update_memory(memory:dict, user_question:str, assistant_answer:str, recent_turns:list[dict], now:str, agent: MemoryAgent) -> dict:
     """Update the memory document with new summary, facts, and recent turns."""
-    # Extract facts from the user question and assistant answer
-    new_facts = _extract_memory_facts(memory, user_question, assistant_answer)
-    updated_facts = _update_memory_facts(memory.get("facts", []), user_question, assistant_answer)
+    recent_turns = trim_recent_turns(recent_turns)
+    recent_text = format_recent_turns(recent_turns)
 
-    # Update recent turns
-    updated_recent_turns = recent_turns[-10:]  # Keep only the last 10 turns
-
-    # Update summary 
-    #TODO: Implement a more sophisticated summary update, possibly using an LLM to summarise the conversation so far
-    if memory.get("summary"):
-        updated_summary = memory.get("summary", "") + f"\nUser: {user_question}\nAssistant: {assistant_answer}"
-    else:
-        updated_summary = f"User: {user_question}\nAssistant: {assistant_answer}" # have to set the summary to something to break out of the empty state
+    summary = agent.summarise(memory.get("summary", ""))
+    extracted = agent.extract_facts(recent_text)
+    facts = _update_facts(memory.get("facts", []), extracted)
 
     return {
         "enabled": memory.get("enabled", True),
-        "summary": updated_summary.strip(),
-        "facts": updated_facts,
-        "recent_turns": updated_recent_turns,
+        "summary": summary,
+        "facts": facts,
+        "recent_turns": recent_turns,
         "last_refreshed_at": now,
-        "last_refreshed_turn_count": len(updated_recent_turns),
+        "last_refreshed_turn_count": len(recent_turns),
     }
 
-def _extract_memory_facts(memory: dict, user_question: str, assistant_answer: str) -> list[str]:
-    # Minimal first version: keep previous facts, add any new obvious fact
-    memory_facts = memory.get("facts", [])
-    #TODO: Implement a more sophisticated fact extraction from the user question and assistant answer
-    return memory_facts
 
-def _fetch_recent_turns(db, conversation_id: str, limit: int = 5) -> list[dict]:
-    """Fetch the most recent turns (user + assistant messages) for a conversation."""
-    cursor = db["messages"].find({"conversation_id": conversation_id})
-    cursor = cursor.sort("created_at", -1).limit(limit * 2)  # Fetch more to account for both roles
-    turns = [{"role": m["role"], "content": m["content"], "created_at": m["created_at"]} for m in cursor]
-    return list (reversed(turns))  # Return in chronological order, turns is a stack of messages, so we reverse it to get the correct order
 
+def update_facts(existing: list[str], new_facts: list[str]) -> list[str]:
+    """
+    Helper function that updates old facts with new ones.
+    """
+    existing = [fact.strip() for fact in existing if fact and fact.strip()]
+    merged = list(dict.fromkeys(existing + [fact for fact in new_facts if fact and fact.strip()]))
+    return merged[-MAX_FACTS:]
+
+
+def format_facts(facts: list[Any]) -> list[str]:
+    """
+    Helper function that cleans up facts before adding to memory.
+    """
+    normalised: list[str] = []
+    seen: set[str] = set()
+    for fact in facts:
+        if not isinstance(fact, str):
+            continue
+        text = fact.strip()
+        if not text:
+            continue
+        if text.lower() in seen:
+            continue
+        seen.add(text.lower())
+        normalised.append(text)
+        if len(normalised) >= _MAX_FACTS:
+            break
+    return normalised
+
+
+def parse_json_array(raw: str) -> list[str]:
+    """
+    Takes output from llm and tries to extract json of facts to put into the mongoDB, else does line extraction.
+    This function is to ensure that output from llm is processed correctly.
+    """
+    candidate = raw.strip()
+    candidate = re.sub(r"^```(?:json)?\n", "", candidate, flags=re.I)
+    candidate = re.sub(r"\n```$", "", candidate)
+
+    json_start = candidate.find("[")
+    json_end = candidate.rfind("]")
+    if json_start != -1 and json_end != -1 and json_end > json_start:
+        candidate = candidate[json_start : json_end + 1]
+
+    try:
+        parsed = json.loads(candidate)
+        if isinstance(parsed, list):
+            return parsed
+    except Exception:
+        pass
+
+    return []
+
+def fetch_recent_turns(db, conversation_id: str, limit: int = 8) -> list[dict]:
+    """
+    Helper function to return the limit-th most recent entries in the conversation.
+    """
+    if db is None:
+        return []
+
+    cursor = db["messages"] \
+        .find({"conversation_id": conversation_id}) \
+        .sort("created_at", -1) \
+        .limit(limit)
+
+    turns = [
+        {
+            "role": msg.get("role", "user"),
+            "content": msg.get("content", ""),
+            "created_at": msg.get("created_at", ""),
+        }
+        for msg in cursor
+    ]
+    return list(reversed(turns))

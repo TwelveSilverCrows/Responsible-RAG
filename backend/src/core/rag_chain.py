@@ -131,6 +131,7 @@ class RAGChain:
                 "context": itemgetter("question") | ensemble | _format_docs,
                 "question": itemgetter("question"),
                 "group_of_people": itemgetter("group_of_people"),
+                "memory_context": itemgetter("memory_context"),
             }
             | _RAG_PROMPT
             | llm
@@ -140,10 +141,10 @@ class RAGChain:
         logger.info("RAGChain ready.")
 
     @traceable(name="rag_chain_invoke", run_type="chain")
-    def invoke(self, question: str, group_prompt: str, conversation_memory: str = "") -> RAGResult:
+    def invoke(self, question: str, group_prompt: str, memory_context: str = "") -> RAGResult:
         """Run the RAG pipeline and return answer with sources."""
         answer = self._chain.invoke(
-            {"question": question, "group_of_people": group_prompt}
+            {"question": question, "group_of_people": group_prompt, "memory_context": memory_context}
         )
         # Extract rich source metadata from retrieved docs
         sources = _extract_source_metadata(self._ensemble.invoke(question))
