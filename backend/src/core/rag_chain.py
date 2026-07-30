@@ -98,6 +98,7 @@ def _extract_source_metadata(docs) -> list[dict]:
 
 # ── Prompt template ────────────────────────────────────────────────────────────
 _RAG_PROMPT = ChatPromptTemplate.from_template(
+    "Conversation memory: \n{conversation_memory}\n"
     "Answer the question based ONLY on the following context:\n"
     "{context}\n\n"
     "Question: {question}\n\n"
@@ -139,7 +140,7 @@ class RAGChain:
         logger.info("RAGChain ready.")
 
     @traceable(name="rag_chain_invoke", run_type="chain")
-    def invoke(self, question: str, group_prompt: str) -> RAGResult:
+    def invoke(self, question: str, group_prompt: str, conversation_memory: str = "") -> RAGResult:
         """Run the RAG pipeline and return answer with sources."""
         answer = self._chain.invoke(
             {"question": question, "group_of_people": group_prompt}

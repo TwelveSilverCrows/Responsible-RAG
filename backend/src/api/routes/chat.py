@@ -12,6 +12,14 @@ from src.api.schemas.chat import (
 from src.api.middleware import get_current_user
 from src.api.deps import get_rag_chain, get_profile_generator
 
+#memory helper functions import
+from src.core.memory import (
+    _build_memory_context,
+    _init_memory_doc,
+    _update_memory,
+    _fetch_recent_turns
+)
+
 router = APIRouter()
 
 
@@ -57,80 +65,6 @@ def _msg_to_response(doc: dict) -> dict:
         "is_streaming": doc.get("is_streaming", False),
         "created_at": doc.get("created_at", ""),
     }
-
-############ Helper functions for chat memory
-def _init_memory_doc(now: str) -> dict:
-    return {
-        "enabled": True,
-        "summary": "",
-        "facts": [],
-        "recent_turns": [],
-        "last_refreshed_at": now,
-        "last_refreshed_turn_count": 0,
-    }
-
-def _fetch_recent_turns(db, conversation_id: str, limit: int = 5) -> list[dict]:
-    """Fetch the most recent turns (user + assistant messages) for a conversation."""
-    cursor = db["messages"].find({"conversation_id": conversation_id})
-    cursor = cursor.sort("created_at", -1).limit(limit * 2)  # Fetch more to account for both roles
-    turns = [{"role": m["role"], "content": m["content"], "created_at": m["created_at"]} for m in cursor]
-    return list (reversed(turns))  # Return in chronological order, turns is a stack of messages, so we reverse it to get the correct order
-
-def _build_memory_context(memory:dict, recent_turns: list[dict])-> str:
-    """Build a context string from the memory summary, facts, and recent turns."""
-    if not memory or not memory.get("enabled", True):
-        return ""
-
-    summary = memory.get("summary", "").strip()
-    facts = memory.get("facts", [])
-    recent_turns_text = "\n".join(
-        f"{turn['role'].title()}: {turn['content']}"
-        for turn in recent_turns
-    )
-    pieces = []
-    if summary:
-        pieces.append(f"Summary of conversation so far:\n{summary}")
-    if facts:
-        pieces.append(f"Facts:\n" + "\n".join(f"- {fact}" for fact in facts))
-    if recent_turns_text:
-        pieces.append(f"Recent conversation:\n" + recent_turns_text)
-
-    return "\n\n".join(pieces)
-
-def _extract_memory_facts(memory: dict, user_question: str, assistant_answer: str) -> list[str]:
-    # Minimal first version: keep previous facts, add any new obvious fact
-    memory_facts = memory.get("facts", [])
-    #TODO: Implement a more sophisticated fact extraction from the user question and assistant answer
-    return memory_facts
-
-def _update_memory(memory:dict, user_question:str, assistant_answer:str, recent_turns:list[dict], now:str) -> dict:
-    """Update the memory document with new summary, facts, and recent turns."""
-    # Extract facts from the user question and assistant answer
-    new_facts = _extract_memory_facts(memory, user_question, assistant_answer)
-    updated_facts = list(set(memory.get("facts", []) + new_facts))  # Deduplicate to conserve memory
-
-    # Update recent turns
-    updated_recent_turns = recent_turns[-10:]  # Keep only the last 10 turns
-
-    # Update summary 
-    #TODO: Implement a more sophisticated summary update, possibly using an LLM to summarise the conversation so far
-    if memory.get("summary"):
-        updated_summary = memory.get("summary", "") + f"\nUser: {user_question}\nAssistant: {assistant_answer}"
-    else:
-        updated_summary = f"User: {user_question}\nAssistant: {assistant_answer}" # have to set the summary to something to break out of the empty state
-
-    return {
-        "enabled": memory.get("enabled", True),
-        "summary": updated_summary.strip(),
-        "facts": updated_facts,
-        "recent_turns": updated_recent_turns,
-        "last_refreshed_at": now,
-        "last_refreshed_turn_count": len(updated_recent_turns),
-    }
-
-
-###############
-
 
 # ── Conversations ─────────────────────────────────────────────────────────────
 
@@ -351,14 +285,27 @@ async def chat(
             "is_streaming": False,
             "created_at": _now(),
         })
+
+
+        # Update memory after response
+        updated_memory = _update_memory(conv_memory, 
+                                        body.question, 
+                                        result.answer, recent_turns + [{"role":"user", "content": body.question, "created_at": now}, {"role": "assistant", "content":result.answer, "created_at": _now()}], 
+                                        body.question, 
+                                        result.answer, 
+                                        _now())
+
         db["conversations"].update_one(
             {"_id": ObjectId(conv_id) if ObjectId.is_valid(conv_id) else conv_id},
             {"$set": {
+                #update memory in the conversation document
+                "memory": updated_memory,
                 "last_message": result.answer[:100],
                 "last_message_at": _now(),
                 "updated_at": _now(),
             }, "$inc": {"message_count": 2}},
         )
+
 
     return ChatResponse(
         answer=result.answer,
