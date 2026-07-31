@@ -237,9 +237,16 @@ async def chat(
         else:
             conv_id = f"conv-{uuid4().hex[:12]}"
     else:
-        #if memory not in block, intialise it
-        if "memory" not in conv_doc:
-            conv_doc["memory"] = init_memory(now)
+        # Fetch existing conversation from database
+        if db is not None:
+            conv_doc = db["conversations"].find_one({"_id": ObjectId(conv_id), "user_id": user_id})
+            if not conv_doc:
+                raise HTTPException(404, "Conversation not found")
+            # If memory not in document, initialise it
+            if "memory" not in conv_doc:
+                conv_doc["memory"] = init_memory(now)
+        else:
+            conv_doc = {}
 
 
     # Store user message
@@ -258,6 +265,7 @@ async def chat(
     conv_memory  = conv_doc.get("memory") or init_memory(now) #failsafe
     recent_turns = fetch_recent_turns(db, conv_id, limit=5) if db is not None else []
     memory_context = build_memory_context(conv_memory, recent_turns)
+
 
     # Invoke RAG
     result = chain.invoke(body.question, group_prompt, memory_context)
@@ -295,19 +303,23 @@ async def chat(
         })
 
 
-        recent_turns = fetch_recent_turns(db, conv_id, limit=8)
+    recent_turns = fetch_recent_turns(db, conv_id, limit=8)
+    #increment by 2 because we haven't reached the end of the request yet
+    total_turn_count = conv_doc.get("message_count", 0) + 2
 
-        if should_update_memory(conv_memory, recent_turns):
-            updated_memory = update_memory(
-                conv_memory,
-                body.question,
-                result.answer,
-                recent_turns,
-                _now(),
-                memory_agent,
-            )
-        else:
-            updated_memory = conv_memory
+    if should_update_memory(conv_memory, total_turn_count):
+        updated_memory = update_memory(
+            conv_memory,
+            body.question,
+            result.answer,
+            recent_turns,
+            _now(),
+            memory_agent,
+            total_turn_count,
+        )
+    else:
+        updated_memory = conv_memory
+
     
         db["conversations"].update_one(
             {"_id": ObjectId(conv_id) if ObjectId.is_valid(conv_id) else conv_id},

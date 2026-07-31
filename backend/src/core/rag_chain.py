@@ -98,7 +98,7 @@ def _extract_source_metadata(docs) -> list[dict]:
 
 # ── Prompt template ────────────────────────────────────────────────────────────
 _RAG_PROMPT = ChatPromptTemplate.from_template(
-    "Conversation memory: \n{conversation_memory}\n"
+    "Conversation memory: \n{memory_context}\n"
     "Answer the question based ONLY on the following context:\n"
     "{context}\n\n"
     "Question: {question}\n\n"
@@ -128,10 +128,10 @@ class RAGChain:
 
         self._chain = (
             {
+                "memory_context": itemgetter("memory_context"),
                 "context": itemgetter("question") | ensemble | _format_docs,
                 "question": itemgetter("question"),
-                "group_of_people": itemgetter("group_of_people"),
-                "memory_context": itemgetter("memory_context"),
+                "group_of_people": itemgetter("group_of_people")
             }
             | _RAG_PROMPT
             | llm

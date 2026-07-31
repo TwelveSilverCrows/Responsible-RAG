@@ -14,7 +14,7 @@ from src.core.config import get_settings
 
 DEFAULT_RECENT_TURNS = 8
 MAX_FACTS = 10
-_REFRESH_EVERY = 4
+_REFRESH_EVERY = 1
 
 _SUMMARY_PROMPT = ChatPromptTemplate.from_template(
     "You are a memory assistant that updates a concise session summary based "
@@ -48,12 +48,12 @@ class MemoryAgent:
 
     def _get_llm(self):
         """ This function initialises the chat model for memory purposes."""
-        if self.llm is None:
-            self.llm = init_chat_model(
+        if self._llm is None:
+            self._llm = init_chat_model(
                 model = self._settings.llm_model,
                 temperature = self._settings.llm_temperature,
             )
-        return self.llm
+        return self._llm
 
     def _get_summary_chain(self):
         """
@@ -79,7 +79,7 @@ class MemoryAgent:
         Fact extraction enables long-term memory.
         """
         if self._facts_chain is None:
-            self.facts_chain = (
+            self._facts_chain = (
                 {"recent_turns": itemgetter("recent_turns")}
                 |_FACTS_PROMPT
                 |self._get_llm()
@@ -151,35 +151,40 @@ def build_memory_context(memory:dict[str,Any], recent_turns: list[dict[str,str]]
 
     return "\n\n".join(pieces)
 
-def should_update_memory(memory:dict[str,Any], recent_turns: list[dict[str, str]]) -> bool:
+def should_update_memory(memory: dict[str, Any], total_turn_count: int) -> bool:
     """
-    Returns a bool that indicates if enough turns have passed to update memory.
-    Should reduce latency and token usage, hopefully.
+    Returns True if enough turns have passed to justify refreshing memory.
+    total_turn_count is the STABLE total number of messages in the
+    conversation (from db.count_documents), not a truncated in-memory list.
     """
-    if not recent_turns:
+    if total_turn_count <= 0:
         return False
 
-    turn_count = len(recent_turns)
-    last_refreshed_turn_count = memory.get("last_refreshed_turn_count", 0)
-
-    #Always refresh once if there is no summary
+    # Always refresh once if there is no summary yet
     if not memory.get("summary", "").strip():
         return True
 
-    #refresh every N turns
-    return (turn_count - last_refreshed_turn_count) >= _REFRESH_EVERY
+    last_refreshed_turn_count = memory.get("last_refreshed_turn_count", 0)
+    return (total_turn_count - last_refreshed_turn_count) >= _REFRESH_EVERY
 
 
 
-
-def update_memory(memory:dict, user_question:str, assistant_answer:str, recent_turns:list[dict], now:str, agent: MemoryAgent) -> dict:
-    """Update the memory document with new summary, facts, and recent turns."""
+def update_memory(
+    memory: dict,
+    user_question: str,
+    assistant_answer: str,
+    recent_turns: list[dict],
+    now: str,
+    agent: MemoryAgent,
+    total_turn_count: int,
+) -> dict:
+    """Update the memory document with the latest exchange and refreshed summary/facts."""
     recent_turns = trim_recent_turns(recent_turns)
     recent_text = format_recent_turns(recent_turns)
 
-    summary = agent.summarise(memory.get("summary", ""))
-    extracted = agent.extract_facts(recent_text)
-    facts = _update_facts(memory.get("facts", []), extracted)
+    summary = agent._update_summary(memory.get("summary", ""), recent_text)
+    extracted = agent._extract_memory_facts(recent_text)
+    facts = update_facts(memory.get("facts", []), extracted)
 
     return {
         "enabled": memory.get("enabled", True),
@@ -187,7 +192,7 @@ def update_memory(memory:dict, user_question:str, assistant_answer:str, recent_t
         "facts": facts,
         "recent_turns": recent_turns,
         "last_refreshed_at": now,
-        "last_refreshed_turn_count": len(recent_turns),
+        "last_refreshed_turn_count": total_turn_count,   # stable, matches next turn's count
     }
 
 
@@ -217,7 +222,7 @@ def format_facts(facts: list[Any]) -> list[str]:
             continue
         seen.add(text.lower())
         normalised.append(text)
-        if len(normalised) >= _MAX_FACTS:
+        if len(normalised) >= MAX_FACTS:
             break
     return normalised
 
