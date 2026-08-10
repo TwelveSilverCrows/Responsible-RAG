@@ -71,7 +71,7 @@ services:
       - ../storage/mongo/init.js:/docker-entrypoint-initdb.d/init.js:ro
       # Entrypoint wrapper handles rough restores (copied WiredTiger files)
       - ../storage/mongo/entrypoint-wrapper.sh:/entrypoint-wrapper.sh:ro
-    entrypoint: ["/bin/bash", "/entrypoint-wrapper.sh"]
+
     healthcheck:
       test: ["CMD", "mongosh", "--quiet",
              "--username", "${MONGO_APP_USER:-rag}",
