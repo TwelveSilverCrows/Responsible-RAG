@@ -88,6 +88,10 @@ class Settings(BaseSettings):
     vec_weight: float = 0.7                # Must sum to 1.0 with bm25_weight
     bm25_weight: float = 0.3
 
+    # Thresholds for up-to-k ranking
+    retriever_score_threshold: float = 0.0 # set to 0 to disable filtering
+    max_returned_sources: int = 5
+
     # ── MongoDB ───────────────────────────────────────────────────────────────
     mongo_uri: str = ""
     mongo_db: str = "responsible_rag"

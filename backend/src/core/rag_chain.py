@@ -137,16 +137,59 @@ class RAGChain:
             | llm
             | StrOutputParser()
         )
+
         self._ensemble = ensemble
+        self._settings = settings
         logger.info("RAGChain ready.")
 
     @traceable(name="rag_chain_invoke", run_type="chain")
     def invoke(self, question: str, group_prompt: str, memory_context: str = "") -> RAGResult:
-        """Run the RAG pipeline and return answer with sources."""
+        """Runs the RAG pipeline and return answer with sources.
+        Post-process retrieved documents so that at most ``max_returned_sources``
+        are returned and documents below ``retriever_score_threshold`` are
+        discarded. This implements an "up to k" behaviour using a similarity
+        threshold, which you can change in the .env file.
+        """
         answer = self._chain.invoke(
             {"question": question, "group_of_people": group_prompt, "memory_context": memory_context}
         )
-        # Extract rich source metadata from retrieved docs
-        sources = _extract_source_metadata(self._ensemble.invoke(question))
-        return RAGResult(answer=answer, sources=sources)
 
+        #retrieves candidate docs from the ensemble retriever
+        docs = self._ensemble.invoke(question)
+
+        #helper to extract a numeric score from a document's metadata
+        def _get_doc_score(d):
+            meta = getattr(d, "metadata", {}) or {}
+            for key in ("score", "similarity", "relevance"):
+                v = meta.get(key)
+                if v is not None:
+                    try:
+                        return float(v)
+                    except Exception:
+                        pass
+            return None
+
+        threshold = getattr(self._settings, "retriever_score_threshold", 0.0)
+        max_sources = getattr(self._settings, "max_returned_sources", None)
+
+        #filter by threshold
+        if threshold and threshold > 0.0:
+            filtered = [d for d in docs if (_get_doc_score(d) is not None and _get_doc_score(d) >= threshold)]
+        else:
+            filtered = list(docs)
+
+        #sort by score descending when score available else preserve original order
+        def _sort_key(d):
+            s = _get_doc_score(d)
+            return s if s is not None else float("-inf")
+
+        filtered.sort(key=_sort_key, reverse=True)
+
+        # Apply maximum cap (None is no cap)
+        if max_sources is not None and max_sources > 0:
+            selected = filtered[: max_sources]
+        else:
+            selected = filtered
+
+        sources = _extract_source_metadata(selected)
+        return RAGResult(answer=answer, sources=sources)
