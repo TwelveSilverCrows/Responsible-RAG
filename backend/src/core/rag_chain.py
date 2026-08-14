@@ -156,40 +156,74 @@ class RAGChain:
 
         #retrieves candidate docs from the ensemble retriever
         docs = self._ensemble.invoke(question)
+        if docs:
+            d0 = docs[0]
+            print("repr(d0):", repr(d0))
+            print("type(d0):", type(d0))
+            print("dir(d0) snippet:", [n for n in dir(d0) if not n.startswith("_")][:50])
+            print("getattr score:", getattr(d0, "score", None))
+            print("getattr similarity:", getattr(d0, "similarity", None))
+            print("metadata keys:", list(getattr(d0, "metadata", {}).keys() if hasattr(d0, "metadata") else []))
+            if isinstance(d0, dict):
+                print("top-level keys (dict):", list(d0.keys()))
 
-        #helper to extract a numeric score from a document's metadata
+            # Safely convert retriever result to list
+        docs_list = list(docs) if docs is not None else []
+
+        # Helper to read metadata dict from different doc shapes (object or dict)
+        def _get_metadata(d):
+            if isinstance(d, dict):
+                return d.get("metadata") or {}
+            # some doc classes expose a .metadata attribute
+            return getattr(d, "metadata", {}) or {}
+
+        # Helper to extract a numeric score from a document's metadata (robust)
         def _get_doc_score(d):
-            meta = getattr(d, "metadata", {}) or {}
+            meta = _get_metadata(d)
+            # Common locations: metadata["score"], metadata["similarity"], metadata["relevance"]
             for key in ("score", "similarity", "relevance"):
-                v = meta.get(key)
-                if v is not None:
+                if key in meta:
+                    v = meta.get(key)
                     try:
                         return float(v)
                     except Exception:
                         pass
+            # Sometimes retrievers set top-level fields (e.g., dict with 'score')
+            if isinstance(d, dict) and "score" in d:
+                try:
+                    return float(d["score"])
+                except Exception:
+                    pass
+            # No numeric score available
             return None
 
-        threshold = getattr(self._settings, "retriever_score_threshold", 0.0)
+        threshold = float(getattr(self._settings, "retriever_score_threshold", 0.0) or 0.0)
         max_sources = getattr(self._settings, "max_returned_sources", None)
 
-        #filter by threshold
-        if threshold and threshold > 0.0:
-            filtered = [d for d in docs if (_get_doc_score(d) is not None and _get_doc_score(d) >= threshold)]
+        # If threshold > 0: keep only docs with numeric score >= threshold. Otherwise keep all.
+        if threshold > 0.0:
+            filtered = [d for d in docs_list if (_get_doc_score(d) is not None and _get_doc_score(d) >= threshold)]
         else:
-            filtered = list(docs)
+            filtered = docs_list
 
-        #sort by score descending when score available else preserve original order
+        # Sort by score descending when available; keep original order for no-score docs
         def _sort_key(d):
             s = _get_doc_score(d)
-            return s if s is not None else float("-inf")
+            # Put no-score docs after scored ones, but preserve their order among themselves
+            return (0, ) if s is None else (1, float(s))
 
-        filtered.sort(key=_sort_key, reverse=True)
+        # Use stable sort (Python's sort is stable) reversing by numeric value:
+        # - put scored docs first sorted by score desc, then no-score docs in original order
+        scored = [d for d in filtered if _get_doc_score(d) is not None]
+        noscore = [d for d in filtered if _get_doc_score(d) is None]
+        scored.sort(key=lambda d: _get_doc_score(d), reverse=True)
+        ordered = scored + noscore
 
-        # Apply maximum cap (None is no cap)
+        # Cap the number of documents (apply before deduplication). If you prefer cap after dedup, slice after _extract_source_metadata.
         if max_sources is not None and max_sources > 0:
-            selected = filtered[: max_sources]
+            selected = ordered[:max_sources]
         else:
-            selected = filtered
+            selected = ordered
 
         sources = _extract_source_metadata(selected)
         return RAGResult(answer=answer, sources=sources)
